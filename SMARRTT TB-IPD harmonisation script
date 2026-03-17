@@ -3,16 +3,16 @@
 # Author: Natalia Yatskevich
 # Version: 1.0
 # Date: 17.03.2026
-# Purpose: Transform REDCap export to TB-IPD data dictionary v1.0 format
+# Purpose: Transform RedCap export to TB-IPD data dictionary v1.0 format
 
 # NOTE:
 # This script was developed for harmonising the Belarus SMARRTT dataset.
-# Some transformations are specific to the Belarus REDCap database structure.
+# Some transformations are specific to the Belarus RedCap database structure.
 # The script may require adaptation before use with other datasets.
 
 
 # NOTE: Dataset-specific transformations
-# The following steps are specific to the Belarus REDCap database:
+# The following steps are specific to the Belarus RedCap database:
 # - handling of baseline sputum culture negative cases
 # - pregnancy and infant indicators
 # - handling of certain variables on the BASELINE tab
