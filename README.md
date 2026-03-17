@@ -9,6 +9,7 @@ These include handling of:
 
 • baseline sputum culture negative cases
 • pregnancy and infant indicators
+• some variables on the BASELINE tab
 • linezolid dose reductions
 • adverse event (AE) recording structure
 • treatment interruption variables
