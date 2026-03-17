@@ -20,6 +20,3 @@ variable naming, and data entry practices.
 
 Users are encouraged to review each transformation step before 
 applying the script to their own dataset.
-<img width="484" height="322" alt="image" src="https://github.com/user-attachments/assets/9d647b1c-b8cf-4f43-9088-77e40793d1e8" />
-
-
