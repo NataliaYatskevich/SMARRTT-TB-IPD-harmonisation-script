@@ -1,5 +1,7 @@
-# SMARRTT-TB-IPD-harmonisation-script
-This script was developed to harmonise the Belarus SMARRTT dataset from the REDCap export format to the TB-IPD data dictionary v1.0 format.
+README
+
+This script was developed to harmonise the Belarus SMARRTT dataset 
+from the REDCap export format to the TB-IPD data dictionary v1.0 format.
 
 Some sections of the script contain dataset-specific transformations 
 based on how variables were recorded in the Belarus database. 
@@ -17,3 +19,6 @@ variable naming, and data entry practices.
 
 Users are encouraged to review each transformation step before 
 applying the script to their own dataset.
+<img width="484" height="322" alt="image" src="https://github.com/user-attachments/assets/9d647b1c-b8cf-4f43-9088-77e40793d1e8" />
+
+
