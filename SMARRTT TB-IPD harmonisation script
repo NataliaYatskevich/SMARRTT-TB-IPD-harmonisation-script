@@ -1,0 +1,1635 @@
+# SMARRTT TB-IPD harmonisation script
+# Dataset: Belarus SMARRTT cohort
+# Author: Natalia Yatskevich
+# Version: 1.0
+# Date: 17.03.2026
+# Purpose: Transform REDCap export to TB-IPD data dictionary v1.0 format
+
+# NOTE:
+# This script was developed for harmonising the Belarus SMARRTT dataset.
+# Some transformations are specific to the Belarus REDCap database structure.
+# The script may require adaptation before use with other datasets.
+
+
+# NOTE: Dataset-specific transformations
+# The following steps are specific to the Belarus REDCap database:
+# - handling of baseline sputum culture negative cases
+# - pregnancy and infant indicators
+# - handling of certain variables on the BASELINE tab
+# - linezolid dose reductions
+# - adverse event structure
+# These steps may need adaptation for other datasets.
+
+
+# Установка и загрузка нужных пакетов
+if (!require("openxlsx")) install.packages("openxlsx")
+if (!require("readxl")) install.packages("readxl")
+library(openxlsx)
+library(readxl)
+library(dplyr)
+library(lubridate)
+
+# Путь к CSV файлу
+path_redcap_csv <- "~/RedCap/SixMonthAllOralRegim_DATA_2026-03-13_1531.csv"
+
+# Загрузка
+redcap_data <- read.csv("~/RedCap/SixMonthAllOralRegim_DATA_2026-03-13_1531.csv", 
+                        check.names = FALSE, 
+                        na.strings = c("", "NA", " "), 
+                        encoding = "UTF-8")
+
+# Функция-помощник для перекодировки (чтобы не писать одно и то же много раз)
+# Для вариантов 1, 2, 9 -> Yes, No, Unknown
+recode_129 <- function(x) {
+  case_match(as.character(x),
+             "1" ~ "Yes",
+             "2" ~ "No",
+             "9" ~ "Unknown",
+             .default = "" # Все остальное (пусто или другие цифры)
+  )
+}
+
+# Для вариантов 1, 0, 9 -> Yes, No, Unknown
+recode_109 <- function(x) {
+  case_match(as.character(x),
+             "1" ~ "Yes",
+             "0" ~ "No",
+             "9" ~ "Unknown",
+             .default = ""
+  )
+}
+
+# Обработка
+df_baseline_to_write <- redcap_data %>%
+  filter(!is.na(subjectid)) %>%
+  group_by(subjectid) %>%
+  slice(1) %>%
+  ungroup() %>%
+  mutate(
+    # Работаем с датами
+    date_hiv_obj = ymd(hiv_dc_dte),
+    date_art_obj = ymd(arv_initdat),
+    
+    # Форматируем дату как DD/MM/YYYY
+    # !Важно: format() превращает дату в текст
+    art_date_formatted = format(date_art_obj, "%d/%m/%Y")
+  ) %>%
+  transmute(
+    PATIENT_ID        = subjectid,
+    SMOKINGSTATUS     = "",
+    SMOKINGPACKPERDAY = "",
+    SMOKINGTOTALPACKYEAR = "",
+    
+    # Применяем перекодировку
+    ALCOHOL           = recode_129(alcohol),
+    ALCOHOLABUSE      = recode_129(alcohol),
+    DM                = recode_129(conf_diabmel),
+    
+    # Логика: если DM == "Yes", то "Unknown", иначе оставляем как есть (или пустой)
+    INSULINDEPENDENT  = if_else(DM == "Yes", "Unknown", ""), 
+    
+    HBA1C             = hba1c,
+    RENALFAILURE      = "TBD",
+    HEPB              = recode_129(conf_hepatb),
+    HEPC              = recode_109(conf_hepatc), # Здесь 1, 0, 9
+    OTHERLIVER        = "No",
+    
+    HIV               = recode_109(hiv_status),   # Здесь 1, 0, 9
+    HIV_DIAGNOSISYEAR = year(date_hiv_obj),
+    
+    NADIR_CD4         = cd4_count,
+    CD4               = cd4_count,
+    VIRALLOAD         = rna_vl,
+    
+    ART               = recode_129(arv_ongoing),
+    ART_STARTYEAR     = year(date_art_obj),
+    ART_STARTDATE     = art_date_formatted,       # Наш новый формат DD/MM/YYYY
+    ART_REGIMEN       = if_else(ART == "Yes", "TBD", ""),
+    
+    # Пустые колонки
+    BLMUARMCIR = "", BLEDEMA = "", BLW2PRCNTL = "", 
+    BLMALYN = "", BLMALM = "", BLLOWNUTRI = ""
+  )
+
+# Запись
+wb <- loadWorkbook("~/RedCap/TB_IPD data dictionary v1.0_NY.xlsx")
+writeData(wb, sheet = "BASELINE", x = df_baseline_to_write)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка BASELINE успешно обновлена с новыми форматами, но пока без RENALFAILURE, INSULINDEPENDENT и ART_REGIMEN!")
+
+################################################################
+# 1. Сбор данных по всем визитам (склеиваем все записи по препаратам и болезням)
+baseline_combined <- redcap_data %>%
+  group_by(record_id) %>%
+  summarise(
+    SUBJ_ID      = first(na.omit(subjectid)),
+    HIV_DATE     = first(na.omit(hiv_dc_dte)),
+    ART_ONGOING  = first(na.omit(arv_ongoing)),
+    ART_DATE     = first(na.omit(arv_initdat)),
+    ALCOHOL_VAL  = first(na.omit(alcohol)),
+    DM_VAL       = first(na.omit(conf_diabmel)),
+    HEPB_VAL     = first(na.omit(conf_hepatb)),
+    HEPC_VAL     = first(na.omit(conf_hepatc)),
+    HIV_STAT     = first(na.omit(hiv_status)),
+    CD4_VAL      = first(na.omit(cd4_count)),
+    RNA_VAL      = first(na.omit(rna_vl)),
+    HBA1C_VAL    = first(na.omit(hba1c)),
+    
+    # Собираем ВСЕ записи из cm_drug (препараты) и othmh (болезни) по всем визитам
+    ALL_MEDS     = paste(na.omit(as.character(cm_drug)), collapse = " "),
+    ALL_MH       = paste(na.omit(as.character(othmh)), collapse = " "),
+    .groups = "drop"
+  )
+
+# 2. Финальная обработка
+df_baseline_final <- baseline_combined %>%
+  filter(!is.na(SUBJ_ID)) %>%
+  mutate(
+    # Поиск схем ART в колонке ALL_MEDS
+    ART_FINAL = case_when(
+      grepl("DTG", ALL_MEDS) & grepl("TDF", ALL_MEDS) & grepl("FTC", ALL_MEDS) ~ "DTG, TDF, FTC",
+      grepl("DTG", ALL_MEDS) & grepl("3TC", ALL_MEDS) & grepl("TDF", ALL_MEDS) ~ "DTG, 3TC, TDF",
+      grepl("DTG", ALL_MEDS) & grepl("3TC", ALL_MEDS) & grepl("ABC", ALL_MEDS) ~ "DTG, 3TC, ABC",
+      grepl("DTG", ALL_MEDS) & grepl("ZDV", ALL_MEDS) & grepl("3TC", ALL_MEDS) ~ "DTG, ZDV, 3TC",
+      TRUE ~ ""
+    ),
+    
+    # Поиск инсулинов
+    IS_INSULIN = grepl("инсулин|insulin|актропид|протафан|actrapid|protamin|monoinsulin", ALL_MEDS, ignore.case = TRUE),
+    
+    # Поиск ХБП
+    IS_RENAL = grepl("CKD|ХБП|ХПН|renal failure", ALL_MH, ignore.case = TRUE)
+  ) %>%
+  transmute(
+    PATIENT_ID        = SUBJ_ID,
+    SMOKINGSTATUS     = "",
+    SMOKINGPACKPERDAY = "",
+    SMOKINGTOTALPACKYEAR = "",
+    ALCOHOL           = recode_129(ALCOHOL_VAL),
+    ALCOHOLABUSE      = ALCOHOL,
+    DM                = recode_129(DM_VAL),
+    
+    # Инсулинозависимость (Yes, если есть диабет и нашли инсулин в любом визите)
+    INSULINDEPENDENT  = case_when(
+      DM == "Yes" & IS_INSULIN ~ "Yes",
+      DM == "Yes" & !IS_INSULIN ~ "No",
+      TRUE ~ ""
+    ),
+    
+    HBA1C             = HBA1C_VAL,
+    RENALFAILURE      = if_else(IS_RENAL, "Yes", "No"),
+    HEPB              = recode_129(HEPB_VAL),
+    HEPC              = recode_109(HEPC_VAL),
+    OTHERLIVER        = "No",
+    HIV               = recode_109(HIV_STAT),
+    HIV_DIAGNOSISYEAR = year(ymd(HIV_DATE)),
+    NADIR_CD4         = CD4_VAL,
+    CD4               = CD4_VAL,
+    VIRALLOAD         = RNA_VAL,
+    ART               = recode_129(ART_ONGOING),
+    ART_STARTYEAR     = year(ymd(ART_DATE)),
+    ART_STARTDATE     = format(ymd(ART_DATE), "%d/%m/%Y"),
+    ART_REGIMEN       = ART_FINAL,
+    
+    BLMUARMCIR = "", BLEDEMA = "", BLW2PRCNTL = "", 
+    BLMALYN = "", BLMALM = "", BLLOWNUTRI = ""
+  )
+
+# 3. Запись
+writeData(wb, sheet = "BASELINE", x = df_baseline_final)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка BASELINE готова! Все данные по сопутствующим заболеваниям собраны.")
+################################################################
+# 1. Подготовка данных для FACILITY
+df_facility_to_write <- redcap_data %>%
+  # Фильтруем пустые ID
+  filter(!is.na(subjectid)) %>%
+  # Берем по одной строке на пациента (как в Baseline)
+  group_by(subjectid) %>%
+  slice(1) %>%
+  ungroup() %>%
+  transmute(
+    COUNTRY    = "Belarus",
+    # redcap_data_access_group — это техническое поле RedCap с названием центра
+    SOURCE     = redcap_data_access_group, 
+    SOURCE_ID  = subjectid
+  )
+
+# 2. Запись во вкладку FACILITY
+# (wb у нас уже загружен из path_ipd ранее в коде)
+writeData(wb, sheet = "FACILITY", x = df_facility_to_write)
+
+# 3. Сохранение (можно делать один раз в самом конце всех вкладок)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка FACILITY готова!")
+##################################################################
+# 1. Функция для пола (SEX)
+recode_sex <- function(x) {
+  case_match(as.character(x),
+             "1" ~ "Male",
+             "2" ~ "Female",
+             .default = ""
+  )
+}
+library(tidyr)
+
+# 2. Обработка DEMOGRAPHICS через record_id
+df_demographics_to_write <- redcap_data %>%
+  # Группируем по системному ID (который всегда заполнен)
+  group_by(record_id) %>%
+  summarise(
+    # Вытаскиваем subjectid (берем первое непустое значение для этого пациента)
+    PATIENT_ID   = first(subjectid[!is.na(subjectid) & subjectid != ""], na_rm = TRUE),
+    
+    # Вытаскиваем YEAR из события v0e_arm_1
+    raw_date_ttt = first(ttt_st_dat[redcap_event_name == "v0e_arm_1"], na_rm = TRUE),
+    
+    # Вытаскиваем остальные данные из события v0s_arm_1
+    AGE          = first(age[redcap_event_name == "v0s_arm_1"], na_rm = TRUE),
+    YOB          = first(yob[redcap_event_name == "v0s_arm_1"], na_rm = TRUE),
+    SEX_raw      = first(sex[redcap_event_name == "v0s_arm_1"], na_rm = TRUE),
+    WEIGHT       = first(weight_vsorres[redcap_event_name == "v0s_arm_1"], na_rm = TRUE),
+    HEIGHT       = first(height_vsorres[redcap_event_name == "v0s_arm_1"], na_rm = TRUE),
+    BMI          = first(bmi[redcap_event_name == "v0s_arm_1"], na_rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    date_obj = ymd(raw_date_ttt),
+    YEAR     = year(date_obj)
+  ) %>%
+  transmute(
+    PATIENT_ID = PATIENT_ID,
+    YEAR       = YEAR,
+    AGE        = AGE,
+    DOB        = "",
+    YOB        = YOB,
+    SEX        = recode_sex(SEX_raw),
+    WEIGHT     = WEIGHT,
+    HEIGHT     = HEIGHT,
+    BMI        = BMI
+  )
+
+# 3. Запись
+writeData(wb, sheet = "DEMOGRAPHICS", x = df_demographics_to_write)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка DEMOGRAPHICS готова! YEAR должен подтянуться.")
+##################################################################
+# Упрощенная обработка CD4 через record_id
+df_cd4_to_write <- redcap_data %>%
+  group_by(record_id) %>%
+  summarise(
+    # Вытаскиваем значения, если они есть хоть в одной строке пациента
+    raw_date = first(cd4_dte[!is.na(cd4_dte) & cd4_dte != ""], na_rm = TRUE),
+    val_cd4  = first(cd4_count[!is.na(cd4_count) & cd4_count != ""], na_rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    # Безопасное форматирование даты
+    date_obj = ymd(raw_date),
+    DATE_formatted = format(date_obj, "%d/%m/%Y")
+  ) %>%
+  transmute(
+    PATIENT_ID = record_id,
+    DATE       = DATE_formatted,
+    CD4        = val_cd4,
+    CD4P       = ""
+  )
+
+# Запись и сохранение
+writeData(wb, sheet = "CD4", x = df_cd4_to_write)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка CD4 готова через record_id!")
+##################################################################
+# 1. Список нужных событий
+events_list <- c(
+  "v0s_arm_1", "vt1_arm_1", "vt2_arm_1", "vt3_arm_1", 
+  "vt4_arm_1", "vt5_arm_1", "vt6_arm_1", "vf6_arm_1", 
+  "vf12_arm_1", "unscheduled_visit1_arm_1"
+)
+
+# 2. Обработка WT_HT с подстановкой даты
+df_wtht_to_write <- redcap_data %>%
+  filter(redcap_event_name %in% events_list) %>%
+  # Убираем строки без веса, чтобы не плодить пустые записи
+  filter(!is.na(weight_vsorres) & weight_vsorres != "") %>%
+  mutate(
+    # Умное заполнение даты: 
+    # Если визит v0s_arm_1 — берем visdat, иначе — visit_date
+    final_visit_date = if_else(redcap_event_name == "v0s_arm_1", visdat, visit_date),
+    
+    # Преобразуем в объект даты и затем в формат DD/MM/YYYY
+    date_obj = ymd(final_visit_date),
+    DATE_formatted = format(date_obj, "%d/%m/%Y")
+  ) %>%
+  transmute(
+    PATIENT_ID = record_id,
+    DATE       = DATE_formatted,
+    WEIGHT     = weight_vsorres,
+    HEIGHT     = "", 
+    BMI        = bmi
+  )
+
+# 3. Запись и сохранение
+writeData(wb, sheet = "WT_HT", x = df_wtht_to_write)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка WT_HT готова!")
+
+##################################################################
+# 1. Задаем СТРОГИЙ порядок визитов
+events_order <- c(
+  "v0s_arm_1", 
+  "vt1_arm_1", "vt2_arm_1", "vt3_arm_1", "vt4_arm_1", "vt5_arm_1", "vt6_arm_1", 
+  "unscheduled_visit1_arm_1", 
+  "vf6_arm_1", "vf12_arm_1"
+)
+
+# 2. Обработка WT_HT
+df_wtht_to_write <- redcap_data %>%
+  # Оставляем только нужные визиты
+  filter(redcap_event_name %in% events_order) %>%
+  # Убираем пустые записи по весу
+  filter(!is.na(weight_vsorres) & weight_vsorres != "") %>%
+  
+  mutate(
+    # Превращаем визит в ФАКТОР с нашим порядком уровней
+    redcap_event_name = factor(redcap_event_name, levels = events_order),
+    
+    # Логика дат (как раньше)
+    final_visit_date = if_else(redcap_event_name == "v0s_arm_1", visdat, visit_date),
+    date_obj = ymd(final_visit_date)
+  ) %>%
+  
+  # СОРТИРОВКА: сначала по пациенту, потом по заданному ПОРЯДКУ ВИЗИТОВ
+  arrange(record_id, redcap_event_name) %>% 
+  
+  group_by(record_id) %>%
+  mutate(
+    prev_date = lag(date_obj),
+    is_wrong_chronology = date_obj < prev_date
+  ) %>%
+  ungroup()
+
+# --- ПРОВЕРКА ОШИБОК В КОНСОЛИ ---
+errors <- df_wtht_to_write %>% filter(is_wrong_chronology == TRUE)
+if(nrow(errors) > 0) {
+  message("!!! ВНИМАНИЕ: Нарушена хронология при сортировке по визитам!")
+  print(errors %>% select(record_id, redcap_event_name, date_obj, prev_date))
+} else {
+  message("Все визиты идут в правильном календарном порядке.")
+}
+
+# 3. Финальная таблица
+df_final_wtht <- df_wtht_to_write %>%
+  mutate(DATE_formatted = format(date_obj, "%d/%m/%Y")) %>%
+  transmute(
+    PATIENT_ID = record_id,
+    DATE       = DATE_formatted,
+    WEIGHT     = weight_vsorres,
+    HEIGHT     = "", 
+    BMI        = bmi
+  )
+
+# 4. Запись
+writeData(wb, sheet = "WT_HT", x = df_final_wtht)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+print("Вкладка WT_HT готова! Даты проверены.")
+##################################################################
+# 1. Обработка и проверка
+df_labs_processed <- redcap_data %>%
+  mutate(redcap_event_name = factor(redcap_event_name, levels = events_order)) %>%
+  
+  # Разворачиваем ЭКГ на 3 потенциальных замера
+  pivot_longer(
+    cols = c(ecg_dte_w1, ecg_dte_w2, ecg_dte_m1),
+    names_to = "ecg_period",
+    values_to = "qt_date_vt1"
+  ) %>%
+  
+  mutate(
+    # Выбираем дату ЭКГ в зависимости от визита
+    qt_date_raw = case_when(
+      redcap_event_name == "v0s_arm_1" ~ ecg0_dte,
+      redcap_event_name == "vt1_arm_1" ~ qt_date_vt1,
+      TRUE ~ ecg_dte_mx_v2
+    ),
+    qt_date_obj = ymd(qt_date_raw),
+    HB_CALC = as.numeric(hb_res) / 10,
+    visit_date_final = if_else(redcap_event_name == "v0s_arm_1", visdat, visit_date),
+    
+    timeline_order = case_when(
+      redcap_event_name == "v0s_arm_1" ~ 1,
+      redcap_event_name == "vt1_arm_1" & ecg_period == "ecg_dte_w1" ~ 2,
+      redcap_event_name == "vt1_arm_1" & ecg_period == "ecg_dte_w2" ~ 3,
+      redcap_event_name == "vt1_arm_1" & ecg_period == "ecg_dte_m1" ~ 4,
+      redcap_event_name == "vt2_arm_1" ~ 5,
+      redcap_event_name == "vt3_arm_1" ~ 6,
+      redcap_event_name == "vt4_arm_1" ~ 7,
+      redcap_event_name == "vt5_arm_1" ~ 8,
+      redcap_event_name == "vt6_arm_1" ~ 9,
+      redcap_event_name == "unscheduled_visit1_arm_1" ~ 10,
+      redcap_event_name == "vf6_arm_1" ~ 11,
+      redcap_event_name == "vf12_arm_1" ~ 12,
+      TRUE ~ 99
+    )
+  ) %>%
+  
+  # --- КРИТИЧЕСКИЙ ШАГ: УДАЛЕНИЕ ДУБЛИКАТОВ ---
+  filter(
+    # Для vt1 оставляем строку, только если в ней реально есть дата ЭКГ
+    (redcap_event_name == "vt1_arm_1" & !is.na(qt_date_obj)) |
+      # Для всех остальных визитов оставляем только ПЕРВУЮ из трех копий, 
+      # созданных пивотом (выбираем по техническому имени ecg_dte_w1)
+      (redcap_event_name != "vt1_arm_1" & ecg_period == "ecg_dte_w1")
+  ) %>%
+  
+  # Оставляем строку, если в ней есть хоть какой-то результат (анализ или ЭКГ)
+  filter(!is.na(qt_date_obj) | !is.na(hb_res) | !is.na(alt_sgpt_res)) %>%
+  
+  arrange(record_id, timeline_order) %>%
+  group_by(record_id) %>%
+  mutate(
+    prev_qt_date = lag(qt_date_obj),
+    is_qt_error = !is.na(qt_date_obj) & !is.na(prev_qt_date) & qt_date_obj < prev_qt_date
+  ) %>%
+  ungroup()
+
+# --- ВЫВОД ОШИБОК ---
+errors <- df_labs_processed %>% filter(is_qt_error == TRUE)
+
+if(nrow(errors) > 0) {
+  message("!!! НАЙДЕНЫ ОШИБКИ ХРОНОЛОГИИ ЭКГ (", nrow(errors), " шт.):")
+  print(errors %>% select(record_id, redcap_event_name, qt_date_obj, prev_qt_date), n = Inf)
+} else {
+  # Добавляем это сообщение, чтобы консоль не молчала
+  message("Проверка ЭКГ пройдена успешно: нарушений хронологии не найдено.")
+}
+
+# 2. ФОРМИРОВАНИЕ ТАБЛИЦЫ ДЛЯ EXCEL (с очисткой дублей внутри vt1)
+df_final_labs <- df_labs_processed %>%
+  # Сначала собираем QT_RESULT (как и раньше)
+  mutate(
+    QT_VAL = case_when(
+      redcap_event_name == "v0s_arm_1" ~ coalesce(qtint0_frid, qtint0_frid_2),
+      redcap_event_name == "vt1_arm_1" & ecg_period == "ecg_dte_w1" ~ coalesce(qtint_frid_w1, qtint_frid2_w1),
+      redcap_event_name == "vt1_arm_1" & ecg_period == "ecg_dte_w2" ~ coalesce(qtint_frid_w2, qtint_frid2_w2),
+      redcap_event_name == "vt1_arm_1" & ecg_period == "ecg_dte_m1" ~ coalesce(qtint_frid_m1, qtint_frid2_m1),
+      TRUE ~ coalesce(qtint_frid2_mx_v2, qtint_frid_mx_v2)
+    )
+  ) %>%
+  # Группируем по пациенту и визиту, чтобы найти ПЕРВУЮ строку в каждом визите
+  group_by(record_id, redcap_event_name) %>%
+  mutate(
+    # Если это НЕ первая строка в данном визите, зануляем анализы
+    is_extra_row = row_number() > 1,
+    
+    HB_FINAL   = if_else(is_extra_row, NA_real_, HB_CALC),
+    ALT_FINAL  = if_else(is_extra_row, NA_real_, as.numeric(alt_sgpt_res)),
+    AST_FINAL  = if_else(is_extra_row, NA_real_, as.numeric(ast_sgot_res)),
+    BILI_FINAL = if_else(is_extra_row, NA_real_, as.numeric(bilib)),
+    PLT_FINAL  = if_else(is_extra_row, NA_real_, as.numeric(plat_res))
+  ) %>%
+  ungroup() %>%
+  transmute(
+    PATIENT_ID = record_id,
+    HB_RESULT  = HB_FINAL,
+    HB_DATE    = if_else(is.na(HB_FINAL), "", format(ymd(visit_date_final), "%d/%m/%Y")),
+    PLT_RESULT = PLT_FINAL,
+    PLT_DATE   = if_else(is.na(PLT_FINAL), "", format(ymd(visit_date_final), "%d/%m/%Y")),
+    ALP_RESULT = "", ALP_DATE = "",
+    ALT_RESULT = ALT_FINAL, ALT_DATE = if_else(is.na(ALT_FINAL), "", format(ymd(visit_date_final), "%d/%m/%Y")),
+    AST_RESULT = AST_FINAL, AST_DATE = if_else(is.na(AST_FINAL), "", format(ymd(visit_date_final), "%d/%m/%Y")),
+    BILI_RESULT = BILI_FINAL, BILI_DATE = if_else(is.na(BILI_FINAL), "", format(ymd(visit_date_final), "%d/%m/%Y")),
+    QT_RESULT  = QT_VAL,
+    QT_DATE    = format(qt_date_obj, "%d/%m/%Y"),
+    ECG_RESULT = "", ECG_DATE = ""
+  )
+
+
+# 3. ЗАПИСЬ В ФАЙЛ (этого тоже не хватало)
+writeData(wb, sheet = "LABS", x = df_final_labs)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка LABS сохранена!")
+
+##################################################################
+
+# 1. Функция перекодировки (как раньше)
+recode_culture <- function(x) {
+  case_match(as.character(x),
+             "1" ~ "Positive",
+             "2" ~ "Negative",
+             "3" ~ "Contaminated",
+             "4" ~ "NTM",
+             .default = ""
+  )
+}
+
+# 2. Обработка данных с расчетом месяца и проверкой дат
+df_micro_processed <- redcap_data %>%
+  filter(!is.na(specimen_dte) & specimen_dte != "") %>%
+  
+  group_by(record_id) %>%
+  mutate(
+    # Вытягиваем дату начала лечения для расчетов
+    start_date_raw = first(ttt_st_dat[redcap_event_name == "v0e_arm_1"], na_rm = TRUE),
+    start_date_obj = ymd(start_date_raw),
+    spec_date_obj  = ymd(specimen_dte)
+  ) %>%
+  ungroup() %>%
+  
+  mutate(
+    # Расчет CULTURE_MONTH (0-6 фиксированно, остальные по формуле)
+    calc_month = case_when(
+      redcap_event_name == "v0s_arm_1" ~ 0,
+      redcap_event_name == "vt1_arm_1" ~ 1,
+      redcap_event_name == "vt2_arm_1" ~ 2,
+      redcap_event_name == "vt3_arm_1" ~ 3,
+      redcap_event_name == "vt4_arm_1" ~ 4,
+      redcap_event_name == "vt5_arm_1" ~ 5,
+      redcap_event_name == "vt6_arm_1" ~ 6,
+      TRUE ~ as.numeric(round(as.numeric(spec_date_obj - start_date_obj) / 30.44))
+    )
+  ) %>%
+  
+  # СОРТИРОВКА И ПРОВЕРКА ХРОНОЛОГИИ
+  arrange(record_id, calc_month, spec_date_obj) %>%
+  group_by(record_id) %>%
+  mutate(
+    prev_spec_date = lag(spec_date_obj),
+    is_date_error  = !is.na(spec_date_obj) & !is.na(prev_spec_date) & spec_date_obj < prev_spec_date
+  ) %>%
+  ungroup()
+
+# --- ВЫВОД ОШИБОК В КОНСОЛЬ ---
+micro_errors <- df_micro_processed %>% filter(is_date_error == TRUE)
+if(nrow(micro_errors) > 0) {
+  message("!!! НАЙДЕНЫ ОШИБКИ ХРОНОЛОГИИ ПОСЕВОВ (", nrow(micro_errors), " шт.):")
+  print(micro_errors %>% select(record_id, redcap_event_name, calc_month, spec_date_obj, prev_spec_date))
+} else {
+  message("Проверка дат посевов пройдена: все исследования идут последовательно.")
+}
+
+# 3. Финальная сборка и запись
+df_final_micro <- df_micro_processed %>%
+  transmute(
+    PATIENT_ID     = record_id,
+    CULTURE_DATE   = format(spec_date_obj, "%d/%m/%Y"),
+    CULTURE_MONTH  = calc_month,
+    CULTURE_RESULT = recode_culture(cult_res)
+  )
+
+writeData(wb, sheet = "FUP_MICROBIOLOGY", x = df_final_micro)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+print("Вкладка FUP_MICROBIOLOGY готова! даты проверены.")
+##################################################################
+
+# --- ШАГ 0: Подготовка вспомогательной таблицы с датами начала лечения ---
+# Это нужно сделать один раз в начале, если еще не сделано
+treatment_start_dates <- redcap_data %>%
+  filter(redcap_event_name == "v0e_arm_1") %>%
+  select(record_id, ttt_st_dat) %>%
+  distinct(record_id, .keep_all = TRUE) %>%
+  rename(start_date_val = ttt_st_dat)
+
+# --- ШАГ 1: Функция перекодировки результата посева ---
+recode_culture <- function(x) {
+  case_match(as.character(x),
+             "1" ~ "Positive", "2" ~ "Negative", "3" ~ "Contaminated", "4" ~ "NTM",
+             .default = ""
+  )
+}
+
+# --- ШАГ 2: Основная обработка данных ---
+df_micro_processed <- redcap_data %>%
+  # Оставляем только строки, где есть дата забора материала
+  filter(!is.na(specimen_dte) & specimen_dte != "") %>%
+  
+  # Приклеиваем дату начала лечения к каждой строке посева
+  left_join(treatment_start_dates, by = "record_id") %>%
+  
+  mutate(
+    # Превращаем даты в объекты
+    start_date_obj = ymd(start_date_val),
+    spec_date_obj  = ymd(specimen_dte),
+    
+    # ПРЕВРАЩАЕМ визиты в фактор для ПРАВИЛЬНОЙ проверки хронологии
+    redcap_event_name = factor(redcap_event_name, levels = c(
+      "v0s_arm_1", "vt1_arm_1", "vt2_arm_1", "vt3_arm_1", 
+      "vt4_arm_1", "vt5_arm_1", "vt6_arm_1", 
+      "unscheduled_visit1_arm_1", "vf6_arm_1", "vf12_arm_1"
+    )),
+    
+    # РАСЧЕТ CULTURE_MONTH
+    calc_month = case_when(
+      redcap_event_name == "v0s_arm_1" ~ 0,
+      redcap_event_name == "vt1_arm_1" ~ 1,
+      redcap_event_name == "vt2_arm_1" ~ 2,
+      redcap_event_name == "vt3_arm_1" ~ 3,
+      redcap_event_name == "vt4_arm_1" ~ 4,
+      redcap_event_name == "vt5_arm_1" ~ 5,
+      redcap_event_name == "vt6_arm_1" ~ 6,
+      # Считаем разницу и превращаем в ЧИСЛО (integer) для Excel
+      TRUE ~ as.integer(round(as.numeric(spec_date_obj - start_date_obj) / 30.44))
+    )
+  ) %>%
+  
+  # --- ШАГ 3: ПРОВЕРКА ХРОНОЛОГИИ (по визитам, а не по датам) ---
+  arrange(record_id, redcap_event_name) %>% 
+  group_by(record_id) %>%
+  mutate(
+    prev_spec_date = lag(spec_date_obj),
+    is_date_error  = !is.na(spec_date_obj) & !is.na(prev_spec_date) & spec_date_obj < prev_spec_date
+  ) %>%
+  ungroup()
+
+# --- ШАГ 4: ВЫВОД ОШИБОК В КОНСОЛЬ ---
+micro_errors <- df_micro_processed %>% filter(is_date_error == TRUE)
+if(nrow(micro_errors) > 0) {
+  message("!!! НАЙДЕНЫ ОШИБКИ ХРОНОЛОГИИ ПОСЕВОВ (", nrow(micro_errors), " шт.):")
+  print(micro_errors %>% select(record_id, redcap_event_name, spec_date_obj, prev_spec_date))
+} else {
+  message("Проверка дат посевов пройдена: всё логично.")
+}
+
+# --- ШАГ 5: ФИНАЛЬНАЯ СБОРКА И ЗАПИСЬ ---
+df_final_micro <- df_micro_processed %>%
+  transmute(
+    PATIENT_ID     = record_id,
+    CULTURE_DATE   = format(spec_date_obj, "%d/%m/%Y"),
+    CULTURE_MONTH  = calc_month,
+    CULTURE_RESULT = recode_culture(cult_res)
+  )
+
+writeData(wb, sheet = "FUP_MICROBIOLOGY", x = df_final_micro)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка FUP_MICROBIOLOGY успешно обновлена!")
+#View(micro_errors)
+print(micro_errors, n = 100)
+# --- УЛУЧШЕННЫЙ ВЫВОД ОШИБОК В КОНСОЛЬ ---
+micro_errors <- df_micro_processed %>% filter(is_date_error == TRUE)
+
+if(nrow(micro_errors) > 0) {
+  message("!!! НАЙДЕНЫ ОШИБКИ ХРОНОЛОГИИ ПОСЕВОВ (всего: ", nrow(micro_errors), "):")
+  
+  # Формируем таблицу для печати
+  error_table <- micro_errors %>% 
+    select(record_id, redcap_event_name, spec_date_obj, prev_spec_date)
+  
+  # Печатаем ВЕСЬ список (n = Inf) в формате tibble
+  print(error_table, n = Inf) 
+  
+  # Дополнительно открываем в отдельном окне, чтобы можно было копировать
+  #View(error_table) 
+} else {
+  message("Ошибок не найдено: даты соответствуют порядку визитов.")
+}
+
+##################################################################
+
+# 1. Функция перекодировки (0,1,2,3 -> Positive, -1 -> Negative)
+recode_smear <- function(x) {
+  case_match(as.character(x),
+             c("0", "1", "2", "3") ~ "Positive",
+             "-1" ~ "Negative",
+             .default = ""
+  )
+}
+
+# 2. Находим реальные имена колонок в файле (подставил правильные названия)
+col_date1 <- grep("afb_col1", names(redcap_data), value = TRUE, ignore.case = TRUE)
+col_res1  <- grep("afb_smear1_res", names(redcap_data), value = TRUE, ignore.case = TRUE)
+col_date2 <- grep("afb_col2", names(redcap_data), value = TRUE, ignore.case = TRUE)
+col_res2  <- grep("afb_smear2_res", names(redcap_data), value = TRUE, ignore.case = TRUE)
+
+# 3. Обработка данных (склеиваем два набора данных)
+part1 <- redcap_data %>%
+  select(record_id, redcap_event_name, date_raw = !!col_date1, res_raw = !!col_res1)
+
+part2 <- redcap_data %>%
+  select(record_id, redcap_event_name, date_raw = !!col_date2, res_raw = !!col_res2)
+
+df_smear_processed <- bind_rows(part1, part2) %>%
+  filter(!is.na(date_raw) & date_raw != "") %>%
+  left_join(treatment_start_dates, by = "record_id") %>%
+  mutate(
+    spec_date_obj  = ymd(date_raw),
+    start_date_obj = ymd(start_date_val),
+    redcap_event_name = factor(redcap_event_name, levels = c(
+      "v0s_arm_1", "vt1_arm_1", "vt2_arm_1", "vt3_arm_1", 
+      "vt4_arm_1", "vt5_arm_1", "vt6_arm_1", 
+      "unscheduled_visit1_arm_1", "vf6_arm_1", "vf12_arm_1"
+    )),
+    # РАСЧЕТ SMEAR_MONTH (простой и надежный способ)
+    calc_month = case_when(
+      redcap_event_name == "v0s_arm_1" ~ 0,
+      redcap_event_name == "vt1_arm_1" ~ 1,
+      redcap_event_name == "vt2_arm_1" ~ 2,
+      redcap_event_name == "vt3_arm_1" ~ 3,
+      redcap_event_name == "vt4_arm_1" ~ 4,
+      redcap_event_name == "vt5_arm_1" ~ 5,
+      redcap_event_name == "vt6_arm_1" ~ 6,
+      # Для всех остальных визитов считаем по календарю
+      !is.na(start_date_obj) & !is.na(spec_date_obj) ~ 
+        as.integer(round(as.numeric(difftime(spec_date_obj, start_date_obj, units = "days")) / 30.44)),
+      TRUE ~ NA_integer_
+    )
+    
+
+  ) %>%
+  # ПРОВЕРКА ХРОНОЛОГИИ (сортируем по визитам)
+  arrange(record_id, redcap_event_name, spec_date_obj) %>% 
+  group_by(record_id) %>%
+  mutate(
+    prev_date = lag(spec_date_obj),
+    is_date_error = !is.na(spec_date_obj) & !is.na(prev_date) & spec_date_obj < prev_date
+  ) %>%
+  ungroup()
+
+# 4. Вывод ошибок в консоль
+smear_errors <- df_smear_processed %>% filter(is_date_error == TRUE)
+if(nrow(smear_errors) > 0) {
+  message("!!! НАЙДЕНЫ ОШИБКИ ХРОНОЛОГИИ МАЗКОВ:")
+  print(smear_errors %>% select(record_id, redcap_event_name, spec_date_obj, prev_date), n = Inf)
+}
+
+# 5. Финальная сборка
+df_final_smear <- df_smear_processed %>%
+  transmute(
+    PATIENT_ID   = record_id,
+    SMEAR_DATE   = format(spec_date_obj, "%d/%m/%Y"),
+    SMEAR_MONTH  = calc_month,
+    SMEAR_RESULT = recode_smear(res_raw)
+  ) %>%
+  filter(SMEAR_RESULT != "")
+
+# Запись в Excel
+writeData(wb, sheet = "FUP_MICROSCOPY", x = df_final_smear)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка FUP_MICROSCOPY успешно обновлена!")
+
+##################################################################
+
+library(dplyr)
+library(lubridate)
+
+# 1. Вспомогательные функции для перекодировки
+recode_yes_no <- function(x) {
+  case_match(as.character(x), "1" ~ "Yes", "2" ~ "No", .default = "No")
+}
+
+recode_pos_neg <- function(x) {
+  case_match(as.character(x), "1" ~ "Positive", "2" ~ "Negative", .default = "")
+}
+
+# Для устойчивости (обрати внимание: в RedCap 1 и 2 могут меняться местами в разных полях)
+recode_resist_12 <- function(x) {
+  case_match(as.character(x), "1" ~ "Resistant", "2" ~ "Susceptible", "3" ~ "Indeterminate", .default = "")
+}
+
+recode_resist_21 <- function(x) {
+  case_match(as.character(x), "2" ~ "Resistant", "1" ~ "Susceptible", "3" ~ "Indeterminate", .default = "")
+}
+
+# 2. Обработка данных
+df_geno_dst <- redcap_data %>%
+  # Фильтруем: только скрининг И только те строки, где заполнен subjectid
+  filter(redcap_event_name == "v0s_arm_1" & !is.na(subjectid) & subjectid != "") %>%
+  mutate(
+    # Предварительно переводим ключевые индикаторы в Yes/No для логики GENOTYPIC_USED
+    xp_yn  = recode_yes_no(xpert_yn),
+    lpa1_yn = recode_yes_no(lp_assay_yn),
+    lpa2_yn = recode_yes_no(lp_assay2_yn),
+    xdr_yn  = recode_yes_no(mtb_xdr)
+  ) %>%
+  transmute(
+    PATIENT_ID             = record_id,
+    
+    # Логика: если хоть один тест "Yes", то общий индикатор "Yes"
+    GENOTYPIC_USED         = if_else(xp_yn == "Yes" | lpa1_yn == "Yes" | lpa2_yn == "Yes" | xdr_yn == "Yes", "Yes", "No"),
+    
+    # XPERT
+    XPERT_BASE             = xp_yn,
+    DATE_XPERT             = format(ymd(xpert_date), "%d/%m/%Y"),
+    XPERT_MTBRESULT_BASE   = recode_pos_neg(mtb_compleax),
+    XPERT_RIFRESULT_BASE   = recode_resist_12(rif_resist),
+    
+    # FIRST LINE LPA
+    FIRSTLINE_LPA_BASE     = lpa1_yn,
+    DATE_FIRSTLINE_LPA     = format(ymd(lp_assay_date), "%d/%m/%Y"),
+    FIRSTLINE_LPA_MTB_BASE = "",
+    FIRSTLINE_LPA_H_BASE   = recode_resist_21(isoniazid),
+    FIRSTLINE_LPA_R_BASE   = recode_resist_21(rifampicin),
+    RF2_KATG_MBSTRESC      = "",
+    RF2_INHA_MBSTRESC      = "",
+    
+    # SECOND LINE LPA
+    SECONDLINE_LPA_BASE    = lpa2_yn,
+    DATE_SECONDLINE_LPA    = format(ymd(lp_assay2_date), "%d/%m/%Y"),
+    SECONDLINE_LPA_MTB_BASE = "",
+    SECONDLINE_LPA_SLI_BASE = recode_resist_21(aminogly),
+    SECONDLINE_LPA_FQ_BASE  = recode_resist_21(fluoroq),
+    
+    # XPERT XDR
+    XPERT_XDR_BASE         = xdr_yn,
+    DATE_XDR_XPERT         = format(ymd(mtbxdr_dte), "%d/%m/%Y"),
+    XPERT_XDR_MTBRESULT_BASE = recode_pos_neg(mtbxdr_complex),
+    XPERT_HRESULT_BASE     = recode_resist_12(inh_resist),
+    XPERT_FQRESULT_BASE    = recode_resist_12(fluoq_resist)
+  )
+
+# 3. Запись
+writeData(wb, sheet = "GENO_DST", x = df_geno_dst)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка GENO_DST готова!")
+
+##################################################################
+# 1. Сначала определяем функцию перекодировки (3=R, 2=S, 4=Ind, 1=Not Done)
+recode_pheno_dst <- function(x) {
+  case_match(as.character(x),
+    "3" ~ "Resistant",
+    "2" ~ "Susceptible",
+    "4" ~ "Indeterminate",
+    "1" ~ "Not Done",
+    .default = ""
+  )
+}
+
+# 2. Обработка данных PHENO_DST
+df_pheno_dst_all <- redcap_data %>%
+  # Фильтруем только те строки, где есть дата забора мокроты для ТЛЧ
+  filter(!is.na(dst_sputum_col) & dst_sputum_col != "") %>%
+  
+  # 2. Обработка данных PHENO_DST
+  #df_pheno_dst_all <- redcap_data %>%
+  # Заменяем старый фильтр по дате на фильтр по индикатору ТЛЧ
+  #filter(as.character(dst_yn) == "1") %>%   
+  
+  # Сортируем по пациенту и дате
+  arrange(record_id, ymd(dst_sputum_col)) %>%
+  
+  mutate(
+    # Сначала перекодируем обе колонки моксифлоксацина в текст через нашу функцию
+    mfx_low  = recode_pheno_dst(moxiflox02),
+    mfx_high = recode_pheno_dst(moxiflox05),
+    
+    # Теперь объединяем их в одну колонку DST_MFX_BASE
+    # Логика: если хотя бы одна концентрация показала Resistant — пишем Resistant
+    combined_mfx = case_when(
+      mfx_high == "Resistant" | mfx_low == "Resistant" ~ "Resistant",
+      mfx_high == "Susceptible" | mfx_low == "Susceptible" ~ "Susceptible",
+      mfx_high == "Indeterminate" | mfx_low == "Indeterminate" ~ "Indeterminate",
+      mfx_high == "Not Done" & mfx_low == "Not Done" ~ "Not Done",
+      TRUE ~ coalesce(mfx_high, mfx_low, "")
+    )
+  ) %>%
+  
+  transmute(
+    PATIENT_ID     = record_id,
+    PHENODST       = recode_yes_no(dst_yn), # Убедись, что recode_yes_no определена выше в скрипте
+    DATE_PHENODST  = format(ymd(dst_sputum_col), "%d/%m/%Y"),
+    
+    DST_H_BASE     = recode_pheno_dst(isoniaz),
+    DST_HIGHH_BASE = "",
+    DST_R_BASE     = recode_pheno_dst(rifamp),
+    DST_E_BASE     = recode_pheno_dst(ethamb),
+    DST_Z_BASE     = recode_pheno_dst(pyrazin),
+    DST_AM_BASE    = recode_pheno_dst(amikacin),
+    DST_KM_BASE    = recode_pheno_dst(kanamycin),
+    DST_CM_BASE    = recode_pheno_dst(capreomycin),
+    DST_OFX_BASE   = recode_pheno_dst(oflox),
+    DST_CFX_BASE   = "",
+    
+    # Вставляем наш объединенный результат
+    DST_MFX_BASE   = combined_mfx,
+    
+    DST_LFX_BASE   = recode_pheno_dst(levofl),
+    DST_S_BASE     = recode_pheno_dst(streptom),
+    DST_ETO_BASE   = recode_pheno_dst(ethionamide),
+    DST_PTO_BASE   = recode_pheno_dst(prothiona),
+    DST_CS_BASE    = recode_pheno_dst(cycloserine),
+    DST_TRD_BASE   = "",
+    DST_PAS_BASE   = recode_pheno_dst(pas),
+    DST_LZD_BASE   = recode_pheno_dst(linezolid),
+    DST_CFZ_BASE   = recode_pheno_dst(clofazimine),
+    DST_BDQ_BASE   = recode_pheno_dst(bedaq),
+    DST_DLM_BASE   = recode_pheno_dst(delamanid),
+    DST_PMD_BASE   = recode_pheno_dst(preto)
+  )
+
+# 3. Запись
+writeData(wb, sheet = "PHENO_DST", x = df_pheno_dst_all)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка PHENO_DST готова! Все ТЛЧ сохранены, моксифлоксацин объединен.")
+
+##################################################################
+# Summarize Cultures for Month 0 and 1
+micro_summary <- df_final_micro %>%
+  filter(CULTURE_MONTH <= 1) %>%
+  group_by(PATIENT_ID) %>%
+  summarise(
+    CULTURE_BASE = case_when(
+      any(CULTURE_RESULT == "Positive") ~ "Positive",
+      any(CULTURE_RESULT == "Negative") ~ "Negative",
+      any(CULTURE_RESULT == "Contaminated") ~ "Contaminated",
+      TRUE ~ "Not Done"
+    ),
+    .groups = "drop"
+  )
+
+# Summarize Smears for Month 0 and 1
+smear_summary <- df_final_smear %>%
+  filter(SMEAR_MONTH <= 1) %>%
+  group_by(PATIENT_ID) %>%
+  summarise(
+    AFB_BASE = case_when(
+      any(SMEAR_RESULT == "Positive") ~ "Positive",
+      any(SMEAR_RESULT == "Negative") ~ "Negative",
+      TRUE ~ "Not Done"
+    ),
+    .groups = "drop"
+  )
+
+# 1. Обновленная логика устойчивости (без SLI, с исправленным HRESULT)
+sensitivity_logic <- df_pheno_dst_all %>%
+  bind_rows(df_geno_dst) %>% 
+  group_by(PATIENT_ID) %>%
+  summarise(
+    res_H   = any(c(DST_H_BASE, FIRSTLINE_LPA_H_BASE, XPERT_HRESULT_BASE) == "Resistant", na.rm = TRUE),
+    res_R   = any(c(DST_R_BASE, FIRSTLINE_LPA_R_BASE, XPERT_RIFRESULT_BASE) == "Resistant", na.rm = TRUE),
+    res_FQ  = any(c(DST_LFX_BASE, DST_MFX_BASE, DST_OFX_BASE, SECONDLINE_LPA_FQ_BASE, XPERT_FQRESULT_BASE) == "Resistant", na.rm = TRUE),
+    res_XDR_drugs = any(c(DST_BDQ_BASE, DST_LZD_BASE) == "Resistant", na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    TBSENSSTATUS = case_when(
+      res_R & res_H & res_FQ & res_XDR_drugs ~ "XDR TB",
+      res_R & res_H & res_FQ ~ "pre-XDR fluoroquinolone resistant TB",
+      res_R & res_H ~ "MDR TB",
+      res_R ~ "RR TB",
+      res_H & !res_R ~ "INH Mono TB",
+      TRUE ~ "Sensitive / Other"
+    )
+  )
+
+# 2. Логика локализации (Site Logic) - исправляем заполнение OTHER
+site_logic <- redcap_data %>%
+  group_by(record_id) %>%
+  summarise(
+    DISEASE_SITE_RAW = first(dis_sit[redcap_event_name == "v0e_arm_1"], na_rm = TRUE),
+    EXTRAP_RAW       = first(extrap_site[redcap_event_name == "v0e_arm_1"], na_rm = TRUE),
+    XR_CAV_RAW       = first(xr_cav[redcap_event_name == "v0s_arm_1"], na_rm = TRUE),
+    XR_INTERP_RAW    = first(xr_interp[redcap_event_name == "v0s_arm_1"], na_rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    DISEASE_SITE = case_match(as.character(DISEASE_SITE_RAW), "1" ~ "PTB", "2" ~ "EPTB", .default = "Unknown"),
+    
+    # 1. Сначала определяем основную категорию
+    EXTRAPULM_SITE = case_when(
+      grepl("плевр", EXTRAP_RAW, ignore.case = TRUE) ~ "Pleural TB",
+      EXTRAP_RAW != "" & !is.na(EXTRAP_RAW) ~ "Other",
+      TRUE ~ ""
+    ),
+    
+    # 2. Теперь заполняем уточнение ТОЛЬКО если категория "Other"
+    EXTRAPULM_SITE_OTHER = if_else(EXTRAPULM_SITE == "Other", 
+                                   case_when(
+                                     grepl("мягких тканей", EXTRAP_RAW, ignore.case = TRUE) ~ "Soft tissue TB (left chest wall)",
+                                     grepl("уха", EXTRAP_RAW, ignore.case = TRUE) ~ "TB of the ear",
+                                     grepl("Внутригрудные лимфоузлы", EXTRAP_RAW, ignore.case = TRUE) ~ "Intrathoracic lymphadenopathy",
+                                     TRUE ~ EXTRAP_RAW # Если это "Other", но не подошло под шаблоны — пишем как есть
+                                   ),
+                                   "" # Если это Pleural TB или пусто — в колонке OTHER будет пусто
+    )
+  )
+
+# 3. Сборка финальной таблицы
+df_disease_chars <- df_demographics_to_write %>%
+  select(PATIENT_ID) %>%
+  # Важно: PATIENT_ID может быть обрезан, если он пришел из CSV как фактор. 
+  # Принудительно делаем его строкой.
+  mutate(PATIENT_ID = as.character(PATIENT_ID)) %>%
+  left_join(sensitivity_logic, by = "PATIENT_ID") %>%
+  left_join(micro_summary, by = "PATIENT_ID") %>%
+  left_join(smear_summary, by = "PATIENT_ID") %>%
+  # Соединяем по record_id, если PATIENT_ID в site_logic не совпадает
+  left_join(site_logic, by = c("PATIENT_ID" = "record_id")) %>%
+  transmute(
+    PATIENT_ID,
+    TBMBSTATUS   = "Yes",
+    TBSENSSTATUS = coalesce(TBSENSSTATUS, "Unknown"),
+    DISEASE_SITE,
+    EXTRAPULM_SITE,
+    EXTRAPULM_SITE_OTHER,
+    LUNG_AESEV    = "",
+    CAVITATION_BASE = case_match(as.character(XR_CAV_RAW), "1" ~ "Yes", "2" ~ "No", "9" ~ "Unknown", .default = ""),
+    BILATERAL_BASE  = case_match(as.character(XR_INTERP_RAW), c("2", "3") ~ "Yes", "1" ~ "No", "9" ~ "Unknown", .default = ""),
+    AFB_BASE     = coalesce(AFB_BASE, "Not Done"),
+    CULTURE_BASE = coalesce(CULTURE_BASE, "Not Done"),
+    CULTUREMEDIA = "Solid, Liquid"
+  )
+
+writeData(wb, sheet = "DISEASE_CHARS", x = df_disease_chars)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+
+
+print("Вкладка DISEASE_CHARS готова! ")
+
+##################################################################
+library(dplyr)
+library(lubridate)
+
+# --- ШАГ 1: Логика конверсии (CULTURE_LOGIC) ---
+culture_logic <- df_final_micro %>%
+  mutate(date_obj = dmy(CULTURE_DATE)) %>%
+  group_by(PATIENT_ID) %>%
+  # 1. Запоминаем, был ли позитив на старте (0-1 месяц)
+  mutate(is_positive_base = any(CULTURE_RESULT == "Positive" & CULTURE_MONTH <= 1)) %>%
+  
+  # 2. ИГНОРИРУЕМ контаминацию и пустые записи для поиска цепочки
+  filter(CULTURE_RESULT %in% c("Positive", "Negative")) %>%
+  arrange(PATIENT_ID, date_obj) %>%
+  
+  mutate(
+    # Текущий визит - отрицательный и это Month 1 или позже
+    is_neg_now = (CULTURE_RESULT == "Negative" & CULTURE_MONTH >= 1),
+    # Следующий доступный визит (после любого пропуска) - тоже отрицательный
+    is_neg_next = lead(CULTURE_RESULT == "Negative"),
+    
+    # Считаем разницу в днях между текущим и следующим анализом
+    days_to_next = as.numeric(difftime(lead(date_obj), date_obj, units = "days")),
+    
+    # КАНДИДАТ НА КОНВЕРСИЮ: 
+    # Два минуса подряд И между ними не менее 7 дней
+    conv_candidate = is_neg_now & is_neg_next & (days_to_next >= 7)
+  ) %>%
+  summarise(
+    has_pos_base = first(is_positive_base),
+    # Дата конверсии — дата ПЕРВОГО из этой пары «минусов»
+    CONV_DATE_OBJ = first(date_obj[conv_candidate == TRUE], na_rm = TRUE),
+    HAS_CONVERSION = !is.na(CONV_DATE_OBJ),
+    .groups = "drop"
+  )
+
+# --- ШАГ 2: Сбор исходов из всей базы (OUTCOME_RAW_DATA) ---
+# Ищем данные по исходам во всех визитах, чтобы не пропустить их
+outcome_raw_data <- redcap_data %>%
+  group_by(record_id) %>%
+  summarise(
+    eff_code = first(na.omit(treat_efficacy)),
+    outcome_date_raw = first(na.omit(lstday_treat)),
+    recrud_code = first(na.omit(tb_recrud)),
+    last_fup_raw = first(na.omit(lst_flup_dte)),
+    relapse_code = first(na.omit(iftb_rec)),
+    .groups = "drop"
+  )
+
+# --- ШАГ 3: Финальная сборка TREAT_OUTCOME ---
+df_treat_outcome_final <- outcome_raw_data %>%
+  left_join(treatment_start_dates, by = "record_id") %>%
+  left_join(culture_logic, by = c("record_id" = "PATIENT_ID")) %>%
+  mutate(
+    start_date_obj = ymd(start_date_val),
+    outcome_date_obj = ymd(outcome_date_raw),
+    flup_date_obj = ymd(last_fup_raw),
+    
+    # 1. Основной исход
+    OUTCOME_FINAL = case_when(
+      eff_code == "1" ~ "Cure",
+      eff_code == "2" ~ "Complete",
+      eff_code %in% c("6", "7", "8") ~ "Fail",
+      eff_code == "3" ~ "Death",
+      eff_code == "4" ~ "LTFU",
+      eff_code %in% c("9", "10") ~ "Not evaluated",
+      TRUE ~ "Not evaluated"
+    ),
+    
+    # 2. Логика конверсии (с исключением Complete) - specific to the Belarus REDCap database!!!!!
+    CULTURECONV_VAL = case_when(
+      OUTCOME_FINAL == "Complete" ~ "Baseline Sputum Culture Negative",
+      has_pos_base == FALSE ~ "Baseline Sputum Culture Negative",
+      HAS_CONVERSION == TRUE ~ "Yes",
+      TRUE ~ "No"
+    ),
+    
+    # 3. Реверсия (только при коде 6)
+    CULT_REV_STATUS = if_else(eff_code == "6", "Yes", "No"),
+    
+    # 4. Мониторинг рецидивов
+    REC_MONITOR = if_else(OUTCOME_FINAL %in% c("Cure", "Complete"), "Yes", "No"),
+    REC_DUR = if_else(REC_MONITOR == "Yes" & !is.na(flup_date_obj) & !is.na(outcome_date_obj),
+                      as.integer(ceiling(as.numeric(difftime(flup_date_obj, outcome_date_obj, units = "days")) / 30.44)),
+                      NA_integer_)
+  ) %>%
+  transmute(
+    PATIENT_ID = record_id,
+    OUTCOME_DEFINITION = "WHO 2021",
+    OUTCOME = OUTCOME_FINAL,
+    OUTCOME_DATA = format(outcome_date_obj, "%d/%m/%Y"),
+    CULTURECONV = CULTURECONV_VAL,
+    CULTURECONV_DATE = format(CONV_DATE_OBJ, "%d/%m/%Y"),
+    CULTURECONV_TIME = round(if_else(CULTURECONV_VAL == "Yes", 
+                                     as.numeric(difftime(CONV_DATE_OBJ, start_date_obj, units = "weeks")), 
+                                     NA_real_), 1),
+    TWOCONV = "", SIXCONV = "",
+    CULTUREREV = CULT_REV_STATUS,
+    CULTUREREV_DATE = if_else(CULT_REV_STATUS == "Yes", OUTCOME_DATA, ""),
+    RECURRENCE_MONITORING = REC_MONITOR,
+    RECURRENCE_FOLLOWUP_DUR = REC_DUR,
+    RECURRENCE_OUTCOME = case_match(as.character(recrud_code), "1" ~ "Yes", "2" ~ "No", .default = ""),
+    RECURRENCE_DATE = format(flup_date_obj, "%d/%m/%Y"),
+    RELAPSE_REINFECT = case_match(as.character(relapse_code), "1" ~ "Relapse", "2" ~ "Reinfection", "3" ~ "Unknown", .default = "")
+  )
+
+# ЗАПИСЬ
+writeData(wb, sheet = "TREAT_OUTCOME", x = df_treat_outcome_final)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка TREAT_OUTCOME готова! Конверсия и рецидивы рассчитаны.")
+
+##################################################################
+
+# 1. Функция для "чистой" склейки строк без лишних запятых
+clean_paste <- function(...) {
+  # Собираем аргументы, убираем NA и пустые строки, склеиваем через запятую
+  x <- c(...)
+  x <- x[!is.na(x) & x != "" & x != "NA"]
+  if(length(x) == 0) return("")
+  paste(unique(x), collapse = ", ")
+}
+
+# 2. Обработка данных
+df_prev_treat <- redcap_data %>%
+  group_by(record_id) %>%
+  summarise(
+    # Собираем данные ИЗ ЛЮБОГО визита (на случай, если номер заполнен не в v0s)
+    PASTTX_RAW   = first(na.omit(reg_gp)),
+    FLD_RAW      = first(na.omit(hist_drug)),
+    SLD_RAW      = first(na.omit(drg_1mth)),
+    
+    # Собираем названия препаратов (проверяем 1 во всех строках пациента)
+    A = clean_paste(
+      if(any(tb_drg_a___1 == 1, na.rm = TRUE)) "Levofloxacin",
+      if(any(tb_drg_a___2 == 1, na.rm = TRUE)) "Moxifloxacin",
+      if(any(tb_drg_a___3 == 1, na.rm = TRUE)) "Bedaquiline",
+      if(any(tb_drg_a___4 == 1, na.rm = TRUE)) "Linezolid",
+      if(any(tb_drg_a___5 == 1, na.rm = TRUE)) "Pretomanid",
+      if(any(tb_drg_a___6 == 1, na.rm = TRUE)) "Other"
+    ),
+    
+    B = clean_paste(
+      if(any(tb_drg_b___1 == 1, na.rm = TRUE)) "Clofazimine",
+      if(any(tb_drg_b___2 == 1, na.rm = TRUE)) "Cycloserine",
+      if(any(tb_drg_b___3 == 1, na.rm = TRUE)) "Terizidone", 
+      if(any(tb_drg_b___4 == 1, na.rm = TRUE)) "Other"
+    ),
+    
+    C = clean_paste(
+      if(any(tb_drg_c___1 == 1, na.rm = TRUE)) "Ethambutol",
+      if(any(tb_drg_c___2 == 1, na.rm = TRUE)) "Delamanid",
+      if(any(tb_drg_c___3 == 1, na.rm = TRUE)) "Pyrazinamide",
+      if(any(tb_drg_c___4 == 1, na.rm = TRUE)) "Imipenem-cilastatin",
+      if(any(tb_drg_c___5 == 1, na.rm = TRUE)) "Meropenem",
+      if(any(tb_drg_c___6 == 1, na.rm = TRUE)) "Amikacin",
+      if(any(tb_drg_c___7 == 1, na.rm = TRUE)) "Streptomycin",
+      if(any(tb_drg_c___8 == 1, na.rm = TRUE)) "Ethionamide",
+      if(any(tb_drg_c___9 == 1, na.rm = TRUE)) "Prothionamide",
+      if(any(tb_drg_c___10 == 1, na.rm = TRUE)) "PAS",
+      if(any(tb_drg_c___11 == 1, na.rm = TRUE)) "Amoxicillin/Clavulanic and/or other"
+    ),
+    .groups = "drop"
+  ) %>%
+  rowwise() %>%
+  mutate(
+    # Склеиваем итоговый режим без "висячих" запятых
+    DRUGS_FINAL = clean_paste(A, B, C)
+  ) %>%
+  ungroup() %>%
+  transmute(
+    PATIENT_ID      = record_id,
+    PASTTX          = if_else(as.numeric(PASTTX_RAW) %in% c(2, 3, 4, 5), "Yes", "No"),
+    RECEIVEDFLD     = case_match(as.character(FLD_RAW), "1" ~ "Yes", "2" ~ "No", "3" ~ "Unknown", .default = ""),
+    RECEIVEDSLD     = case_match(as.character(SLD_RAW), "1" ~ "Yes", "2" ~ "No", .default = ""),
+    YEARPASTTX1     = NA_real_,
+    # Если лечения не было (No), оставляем пусто, иначе — наш список
+    REGIMENPASTTX1  = if_else(PASTTX == "Yes", DRUGS_FINAL, ""),
+    OUTPASTTX1      = "",
+    YEARPASTTX2     = NA_real_,
+    REGIMENPASTTX2  = "",
+    OUTPASTTX2      = ""
+  )
+
+# 2. Запись
+writeData(wb, sheet = "PREVIOUS_TREAT", x = df_prev_treat)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка PREVIOUS_TREAT готова!")
+
+##################################################################
+# 1. Обработка данных PREVIOUS_TREAT
+df_prev_treat_final <- redcap_data %>%
+  # Группируем по ID, чтобы найти ответ в любом визите
+  group_by(record_id) %>%
+  summarise(
+    PASTTX_RAW   = first(na.omit(reg_gp)),
+    SLD_RAW      = first(na.omit(drg_1mth)),
+    .groups = "drop"
+  ) %>%
+  transmute(
+    PATIENT_ID      = record_id,
+    # 2,3,4,5 -> Yes, 1 -> No
+    PASTTX          = if_else(as.numeric(PASTTX_RAW) %in% c(2, 3, 4, 5), "Yes", "No", missing = "No"),
+    RECEIVEDFLD     = "",
+    RECEIVEDSLD     = case_match(as.character(SLD_RAW), "1" ~ "Yes", "2" ~ "No", .default = ""),
+    YEARPASTTX1     = NA_real_,
+    REGIMENPASTTX1  = "",
+    OUTPASTTX1      = "",
+    YEARPASTTX2     = NA_real_,
+    REGIMENPASTTX2  = "",
+    OUTPASTTX2      = ""
+  )
+
+# 2. Запись
+writeData(wb, sheet = "PREVIOUS_TREAT", x = df_prev_treat_final)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка PREVIOUS_TREAT готова по логике RedCap!")
+##################################################################
+# 1. REGIMEN_INFO Логика определения финального режима
+# 1. Собираем дату окончания и исход из vt6 или unscheduled_visit1
+outcome_final_data <- redcap_data %>%
+  group_by(record_id) %>%
+  summarise(
+    # Сначала ищем в vt6, если там NA — смотрим в unscheduled
+    final_date_raw = coalesce(
+      first(na.omit(lstday_treat[redcap_event_name == "vt6_arm_1"])),
+      first(na.omit(lstday_treat[redcap_event_name == "unscheduled_visit1_arm_1"]))
+    ),
+    
+    eff_code_raw = coalesce(
+      first(na.omit(treat_efficacy[redcap_event_name == "vt6_arm_1"])),
+      first(na.omit(treat_efficacy[redcap_event_name == "unscheduled_visit1_arm_1"]))
+    ),
+    
+    # ЛОГИКА ЗАМЕНЫ: Ищем факт отмены Mfx(4) по причине ТЛЧ(3) и назначения Cfz(5) 
+    has_switch = any(chged_drug == 4 & chge_reason == 3, na.rm = TRUE) & 
+      any(chged_drug == 5, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# 2. Основная обработка
+df_regimen_info_final <- redcap_data %>%
+  # Начинаем с базовой строки (v0e)
+  filter(redcap_event_name == "v0e_arm_1") %>%
+  # ПРИСОЕДИНЯЕМ нашу новую таблицу (outcome_final_data)
+  left_join(outcome_final_data, by = "record_id") %>%
+  mutate(
+    start_date_obj = ymd(ttt_st_dat),
+    end_date_obj   = ymd(final_date_raw),
+    
+    # Расчет недель: ((Конец - Начало) - 1) / 7
+    weeks_calc = (as.numeric(difftime(end_date_obj, start_date_obj, units = "days")) - 1) / 7,
+    
+    # Исходный режим
+    init_reg_txt = case_match(as.character(treat_reg),
+                              "1" ~ "Bdq, Pa, Lzd, Mfx",
+                              "2" ~ "Bdq, Pa, Lzd, Cfz",
+                              .default = ""
+    ),
+    
+    # Финальный режим
+    end_reg_txt = if_else(has_switch, "Bdq, Pa, Lzd, Cfz", init_reg_txt)
+  ) %>%
+  transmute(
+    PATIENT_ID       = record_id,
+    REGIMEN_DURATION = "5.5",
+    TXSTART_DATE     = format(start_date_obj, "%d/%m/%Y"),
+    INITIAL_REGIMEN  = init_reg_txt,
+    TXEND_DATE       = format(end_date_obj, "%d/%m/%Y"),
+    END_REGIMEN      = end_reg_txt,
+    # Если исход 1 или 2, ставим "No"
+    REGIMENDURATION_CHANGE = if_else(as.character(eff_code_raw) %in% c("1", "2"), "No", ""),
+    ADDITIONAL_DRUGS = "",
+    DUR_WEEKS        = round(weeks_calc, 0),
+    DUR_IP           = "",
+    DUR_CP           = ""
+  )
+
+# 3. Запись
+writeData(wb, sheet = "REGIMEN_INFO", x = df_regimen_info_final)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print("Вкладка REGIMEN_INFO готова! Данные из внепланового визита тоже учтены.")
+
+##################################################################
+### ИЗМЕНЕННАЯ ЛОГИКА И МОИ СТОЛБЦЫ
+# 1. Подготовка данных: вытаскиваем все события по препаратам
+df_treatment_events <- redcap_data %>%
+  # Фильтруем нужные визиты и наличие препарата
+  filter(redcap_event_name %in% c(paste0("vt", 1:6, "_arm_1"), "unscheduled_visit1_arm_1")) %>%
+  filter(!is.na(chged_drug) & chged_drug %in% 1:5) %>%
+  
+  # Сортируем для правильного расчета пауз
+  arrange(record_id, chged_drug, ymd(ttt_start_dte)) %>%
+  
+  group_by(record_id, chged_drug) %>%
+  mutate(
+    date_obj = ymd(ttt_start_dte),
+    # Название препарата
+    drug_name = case_match(as.character(chged_drug),
+                           "1" ~ "Bdq", "2" ~ "Pa", "3" ~ "Lzd", "4" ~ "Mfx", "5" ~ "Cfz"
+    ),
+    
+    # Расчет паузы: если сейчас отмена (2), а следующая запись - старт (1)
+    next_date = lead(date_obj),
+    next_type = lead(spec_ch_drug1),
+    pause_calc = if_else(spec_ch_drug1 == 2 & next_type == 1, 
+                         as.numeric(difftime(next_date, date_obj, units = "days")), 
+                         NA_real_),
+    
+    # Признак перманентной отмены (последнее событие - 2 и причина не 3)
+    is_last = row_number() == n(),
+    is_perm = is_last & spec_ch_drug1 == 2 & chge_reason != 3 & chge_reason != 5
+  ) %>%
+  ungroup()
+
+# 2a. Формирование финальной таблицы (без проверочных столбцов)
+df_final_treatment_detail <- df_treatment_events %>%
+  group_by(record_id) %>% # Группируем, чтобы найти первую строку для каждого
+  mutate(is_first_row = row_number() == 1) %>% 
+  ungroup() %>%
+  
+  transmute(
+    PATIENT_ID = record_id,
+    # ... (пустые столбцы DURATIONS и прочие остаются здесь) ...
+    BDQ_DURATION = "", DLM_DURATION = "", PA_DURATION = "", INJ_DURATION = "",
+    LZD_DURATION = "", LZD_DOSE = "", CFZ_DURATION = "", CS_DURATION = "",
+    # ... и так далее до TXSUPPORT_MATERIAL ...
+    
+    PAUSE_DRG       = if_else(spec_ch_drug1 == 2 & next_type == 1, drug_name, ""),
+    PAUSE_DRUG_DAYS = pause_calc,
+    PERM_DRUG       = if_else(is_perm, drug_name, ""),
+    PERM_DRUG_DATE  = if_else(is_perm, format(date_obj, "%d/%m/%Y"), ""),
+    
+    # Вспомогательный столбец для фильтра (потом его уберем)
+    temp_keep = is_first_row
+  ) %>%
+  # ФИЛЬТР: Оставляем если есть данные ИЛИ если это первая строка пациента
+  filter(PAUSE_DRG != "" | PERM_DRUG != "" | temp_keep == TRUE) %>%
+  # Удаляем вспомогательный столбец перед записью
+  select(-temp_keep)
+
+# 3. Запись
+writeData(wb, sheet = "TREATMENT_DETAIL", x = df_final_treatment_detail)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print(paste("Вкладка TREATMENT_DETAIL готова! Создано строк событий:", nrow(df_final_treatment_detail)))
+################################################################## 
+library(tidyr) 
+
+# 1. Список ВСЕХ пациентов 
+all_patients <- redcap_data %>%
+  distinct(record_id)
+
+# 2. Обработка событий
+df_treatment_events <- redcap_data %>%
+  filter(redcap_event_name %in% c(paste0("vt", 1:6, "_arm_1"), "unscheduled_visit1_arm_1")) %>%
+  filter(!is.na(chged_drug) & chged_drug %in% 1:5) %>%
+  arrange(record_id, chged_drug, ymd(ttt_start_dte)) %>%
+  group_by(record_id, chged_drug) %>%
+  mutate(
+    date_obj = ymd(ttt_start_dte),
+    drug_name = case_match(as.character(chged_drug),
+                           "1" ~ "Bdq", "2" ~ "Pa", "3" ~ "Lzd", "4" ~ "Mfx", "5" ~ "Cfz"),
+    next_date = lead(date_obj),
+    next_type = lead(spec_ch_drug1),
+    pause_calc = if_else(spec_ch_drug1 == 2 & next_type == 1, 
+                         as.numeric(difftime(next_date, date_obj, units = "days")), 
+                         NA_real_),
+    is_last = row_number() == n(),
+    is_perm = is_last & spec_ch_drug1 == 2 & !chge_reason %in% c(3, 5)
+  ) %>%
+  ungroup()
+
+# 3. Формируем таблицу только с СОБЫТИЯМИ
+df_events_only <- df_treatment_events %>%
+  filter(is_perm | (spec_ch_drug1 == 2 & next_type == 1)) %>% # оставляем только значимые
+  transmute(
+    record_id,
+    PAUSE_DRG       = if_else(spec_ch_drug1 == 2 & next_type == 1, drug_name, ""),
+    PAUSE_DRUG_DAYS = as.character(pause_calc),
+    PERM_DRUG       = if_else(is_perm, drug_name, ""),
+    PERM_DRUG_DATE  = if_else(is_perm, format(date_obj, "%d/%m/%Y"), "")
+  )
+
+# 4. СОЕДИНЯЕМ: Все пациенты + их события и выстраиваем ПОРЯДОК
+df_final_treatment_detail <- all_patients %>%
+  left_join(df_events_only, by = "record_id") %>%
+  mutate(
+    PATIENT_ID = record_id,
+    # Пустые столбцы оставляем текстовыми
+    BDQ_DURATION = "", DLM_DURATION = "", PA_DURATION = "", INJ_DURATION = "",
+    LZD_DURATION = "", LZD_DOSE = "", CFZ_DURATION = "", CS_DURATION = "",
+    PTO_DURATION = "", Z_DURATION = "", LFX_DURATION = "", MFX_DURATION = "",
+    CLINICVISIT_FREQUENCY = "", DOT = "", DOT_TYPE = "", DOT_FREQUENCY = "",
+    TXSUPPORT_DIGITAL = "", TXSUPPORT_TRACERS = "", TXSUPPORT_PSYCHOLOGICAL = "",
+    TXSUPPORT_EDUCATION = "", TXSUPPORT_MATERIAL = "",
+    
+    # ПРЕОБРАЗУЕМ ДНИ В ЧИСЛА
+    PAUSE_DRUG_DAYS = as.numeric(PAUSE_DRUG_DAYS)
+  ) %>%
+  select(
+    PATIENT_ID, BDQ_DURATION, DLM_DURATION, PA_DURATION, INJ_DURATION,
+    LZD_DURATION, LZD_DOSE, CFZ_DURATION, CS_DURATION, PTO_DURATION, Z_DURATION,
+    LFX_DURATION, MFX_DURATION, CLINICVISIT_FREQUENCY, DOT, DOT_TYPE, DOT_FREQUENCY,
+    TXSUPPORT_DIGITAL, TXSUPPORT_TRACERS, TXSUPPORT_PSYCHOLOGICAL,
+    TXSUPPORT_EDUCATION, TXSUPPORT_MATERIAL,
+    PAUSE_DRG, PAUSE_DRUG_DAYS, PERM_DRUG, PERM_DRUG_DATE
+  )
+
+# 5. Очистка (не превращаем всё в character!)
+# Заменяем NA на "" только в текстовых колонках, а в числовых оставляем NA (Excel поймет это как пустоту)
+df_final_treatment_detail <- df_final_treatment_detail %>%
+  mutate(across(where(is.character), ~replace_na(., "")))
+
+# 6. Запись
+writeData(wb, sheet = "TREATMENT_DETAIL", x = df_final_treatment_detail)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+
+print(paste("Готово! Строк в таблице:", nrow(df_final_treatment_detail)))
+
+################################################################## ++++++++++++!!!! 1- ДЛЯ ПРОВЕРКИ СНЯ
+# 1. Максимально расширенный классификатор MedDRA
+classify_system <- function(diag_val, other_text) {
+  # Подготавливаем текст для поиска (только если диагноз = 99)
+  full_text <- tolower(as.character(other_text))
+  diag_code <- as.character(diag_val)
+  
+  case_when(
+    # --- СНАЧАЛА ПРОВЕРЯЕМ ЦИФРОВЫЕ КОДЫ ---
+    diag_code %in% c("1", "2")   ~ "Cardiac disorders", # Ритм и QT
+    diag_code == "10"            ~ "Hepatobiliary disorders", # ALT/AST
+    diag_code == "11"            ~ "Nervous system disorders", # Оптический неврит
+    diag_code == "16"            ~ "Investigations", # Панкреатит
+    diag_code %in% c("18", "19") ~ "Blood and lymphatic system disorders", # Анемия/Нейтрофилы
+    diag_code == "21"            ~ "Immune system disorders", # Аллергия
+    diag_code == "33"            ~ "Psychiatric disorders", # Психоз
+    diag_code == "35"            ~ "Renal and urinary disorders", # Почки
+    
+    # --- ЗАТЕМ ИЩЕМ ПО ТЕКСТУ (если код 99 или другой) ---
+    grepl("перелом|fracture|укус|змеи|шейки|лодыжки|injury", full_text) ~ "Injury, poisoning and procedural complications",
+    grepl("clostrid|difficile|инфекц|сепсис|sepsis|токсоплаз|пневмон|infection|абсцед|эмпием|лейкоэнцеф", full_text) ~ "Infections and infestations",
+    grepl("рак|карцином|cancer|carcinoma|мтс|neoplasm|опухоль|tongue|язык|пищевод|бронх", full_text) ~ "Neoplasms benign, malignant and unspecified (incl cysts and polyps)",
+    grepl("анем|anemia|neutrophil|нейтроф|острая сердечная недостаточность", full_text) ~ "Blood and lymphatic system disorders",
+    grepl("билируб|билир|гепат|hepat|алт|аст|transam|bilirubin|alt|ast", full_text) ~ "Hepatobiliary disorders",
+    grepl("кишеч|желуд|кровотеч|язва|constipation|ischaemia|intest|рвот|тошн|nausea|gast|непроход|ободоч", full_text) ~ "Gastrointestinal disorders",
+    grepl("инсульт|инфаркт|атака|тиа|гемипарез|церебральн|мозг|сужение|neuritis|зрен|глаз|vision", full_text) ~ "Nervous system disorders",
+    grepl("сердеч|cardiac|ритм|rhythm|левожелудоч|heart", full_text) ~ "Cardiac disorders",
+    grepl("дыхат|хобл|дыхан|copd|легк|остановка", full_text) ~ "Respiratory, thoracic and mediastinal disorders",
+    grepl("qt|интервал|амилаз|amylase|pancreatitis|interval|повышение|увеличение", full_text) ~ "Investigations",
+    grepl("аллерг|allergic|anaphylax", full_text) ~ "Immune system disorders",
+    TRUE ~ "Other"
+  )
+}
+
+# 2. Обработка данных AE
+df_ae_final <- redcap_data %>%
+  # Фильтруем визиты лечения
+  filter(redcap_event_name %in% paste0("vt", 1:6, "_arm_1")) %>%
+  
+  mutate(
+    # Защита от ошибок типов данных
+    grade_num = as.numeric(as.character(ae_intens)),
+    diag_txt  = as.character(diag_ae),
+    oth_txt   = as.character(oth_ae)
+  ) %>%
+  
+  # Фильтр событий (СНЯ или специфические НЯИ)
+  filter(
+    sae_yn == 1 | 
+      # Добавляем проверку кода 10 для гепатита 3 степени
+      ((diag_txt == "10" | grepl("гепат|ALT|аст", diag_txt, ignore.case = TRUE)) & grade_num >= 3) |
+      (grepl("Сужение полей зрения", oth_txt, ignore.case = TRUE) & grade_num == 1)
+  ) %>%
+
+  
+  mutate(
+    system_organ = classify_system(diag_txt, oth_txt),
+    is_ae_related = if_else(chge_reason == 1, "Yes", "No"),
+    is_stop = if_else(spec_ch_drug1 == 2, "Yes", "No"),
+    is_resume = if_else(spec_ch_drug1 == 1, "Yes", "No")
+  ) %>%
+  
+  transmute(
+    PATIENT_ID      = record_id,
+    DRUG            = case_match(as.character(chged_drug), 
+                                 "1" ~ "Bdq", "2" ~ "Pa", "3" ~ "Lzd", "4" ~ "Mfx", "5" ~ "Cfz", .default = ""),
+    DRUG_STOP       = is_stop,
+    DRUG_STOP_DATE  = format(ymd(ttt_start_dte), "%d/%m/%Y"),
+    DRUG_PAUSE      = if_else(is_resume == "Yes", "Yes", "No"),
+    DRUG_PAUSE_DAYS = "", 
+    AE_REASON       = is_ae_related,
+    AE_GRADE        = grade_num,
+    AE_SYSTEMORGAN  = system_organ
+  )
+
+# 3. Запись
+writeData(wb, sheet = "AE", x = df_ae_final)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+# Проверка в консоли
+others_left <- sum(df_ae_final$AE_SYSTEMORGAN == "Other")
+print(paste("Вкладка AE готова! Осталось 'Other':", others_left))
+
+##################################################################
+################################################################## ++++ !!! С препаратами - это дополнительная вкладка (нужно проверить и объединить с AE)
+# 1. Собираем события по препаратам (из TREATMENT_DETAIL)
+library(purrr) # Убедись, что библиотека подключена
+# 1. Собираем ВСЕ медицинские данные НЯ (СНЯ и Grade 3+ и НЯИ (неврит зрительного нерва/сужение полей зрения))
+# последний код второй вариант - правильные степени и названия, но не все
+ae_medical_base <- redcap_data %>%
+  mutate(
+    g_num = as.numeric(as.character(ae_intens)),
+    d_txt = as.character(diag_ae),
+    o_txt = as.character(oth_ae),
+    s_yn  = as.numeric(as.character(sae_yn))
+  ) %>%
+  # Фильтруем только то, что должно быть в отчете
+  filter(s_yn == 1 | g_num >= 3 | (grepl("сужен|полей|зрен", o_txt, ignore.case = TRUE) & g_num == 1)) %>%
+  group_by(record_id, redcap_event_name) %>%
+  summarise(
+    FINAL_DIAG  = first(na.omit(d_txt)),
+    FINAL_OTH   = first(na.omit(o_txt)),
+    FINAL_GRADE = first(na.omit(g_num)),
+    .groups = "drop"
+  )
+# 1. Собираем события только по факту ОСТАНОВКИ (spec_ch_drug1 == 2)
+drug_actions_ae <- df_treatment_events %>%
+  filter(chge_reason == 1) %>% 
+  group_by(record_id, chged_drug) %>%
+  mutate(
+    date_obj = ymd(ttt_start_dte)
+  ) %>%
+  # Работаем с каждой строкой отдельно
+  rowwise() %>%
+  mutate(
+    # Ищем: был ли хоть один старт (1) ПОСЛЕ текущей даты отмены (2) для этого же ID и препарата
+    has_future_resume = any(
+      df_treatment_events$record_id == record_id & 
+        df_treatment_events$chged_drug == chged_drug & 
+        df_treatment_events$spec_ch_drug1 == 1 & 
+        ymd(df_treatment_events$ttt_start_dte) > date_obj
+    )
+  ) %>%
+  ungroup() %>%
+  # Теперь оставляем только строки ОТМЕНЫ (2)
+  filter(spec_ch_drug1 == 2) %>%
+  mutate(
+    is_perm_stop = !has_future_resume,
+    is_temp_pause = has_future_resume
+  )
+
+# 2. Сборка итоговой таблицы AE
+df_ae_final_v_fixed <- drug_actions_ae %>%
+  left_join(ae_medical_base, by = c("record_id", "redcap_event_name")) %>%
+  mutate(
+    SYSTEM_VAL = classify_system(FINAL_DIAG, FINAL_OTH),
+    
+    # Логика TB_IPD data dictionary v1.0
+    STOP_YN   = if_else(is_perm_stop, "Yes", "No"),
+    STOP_DATE = if_else(is_perm_stop, format(date_obj, "%d/%m/%Y"), ""),
+    
+    PAUSE_YN   = if_else(is_temp_pause, "Yes", "No"),
+    # Число дней паузы (из расчета в TREATMENT_DETAIL)
+    PAUSE_DAYS = if_else(is_temp_pause, as.numeric(pause_calc), NA_real_)
+  ) %>%
+  transmute(
+    PATIENT_ID      = record_id,
+    DRUG            = drug_name,
+    DRUG_STOP       = STOP_YN,
+    DRUG_STOP_DATE  = STOP_DATE,
+    DRUG_PAUSE      = PAUSE_YN,
+    DRUG_PAUSE_DAYS = PAUSE_DAYS, 
+    AE_REASON       = STOP_YN,    # Причина перманентной остановки
+    AE_GRADE        = as.numeric(as.character(FINAL_GRADE)),
+    AE_SYSTEMORGAN  = SYSTEM_VAL
+  ) %>%
+  distinct()
+
+# 3. Запись
+writeData(wb, sheet = "AE_1", x = df_ae_final_v_fixed)
+saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+
+print(paste("Во вкладке AE_1 нужно проверить соответствие НЯ и действий с препаратами!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
