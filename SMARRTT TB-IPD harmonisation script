@@ -6,7 +6,8 @@
 # Purpose: Transform RedCap export to TB-IPD data dictionary v1.0 format
 
 # NOTE:
-# This script was developed for harmonising the Belarus SMARRTT dataset.
+# This script was developed as part of the SMARRTT operational research 
+# project (Belarus cohort) for harmonising the Belarus SMARRTT dataset.
 # Some transformations are specific to the Belarus RedCap database structure.
 # The script may require adaptation before use with other datasets.
 
