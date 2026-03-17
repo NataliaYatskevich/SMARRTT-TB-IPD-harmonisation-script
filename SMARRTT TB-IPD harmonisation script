@@ -7,10 +7,10 @@
 
 # NOTE:
 # This script was developed as part of the SMARRTT operational research 
-# project (Belarus cohort) for harmonising the Belarus SMARRTT dataset.
+# project (Belarus cohort) to provide a reproducible workflow 
+# for harmonising RedCap data into the TB-IPD data dictionary v1.0 format.
 # Some transformations are specific to the Belarus RedCap database structure.
 # The script may require adaptation before use with other datasets.
-
 
 # NOTE: Dataset-specific transformations
 # The following steps are specific to the Belarus RedCap database:
@@ -20,7 +20,6 @@
 # - linezolid dose reductions
 # - adverse event structure
 # These steps may need adaptation for other datasets.
-
 
 # Установка и загрузка нужных пакетов
 if (!require("openxlsx")) install.packages("openxlsx")
