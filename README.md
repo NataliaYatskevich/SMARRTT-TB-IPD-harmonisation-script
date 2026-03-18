@@ -21,3 +21,6 @@ variable naming, and data entry practices.
 
 Users are encouraged to review each transformation step before 
 applying the script to their own dataset.
+
+The script also includes several basic data consistency checks 
+(e.g. date logic) to help identify potential data issues before harmonisation.
