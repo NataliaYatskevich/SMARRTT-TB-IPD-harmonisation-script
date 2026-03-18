@@ -1473,7 +1473,7 @@ saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print(paste("Готово! Строк в таблице:", nrow(df_final_treatment_detail)))
 
-################################################################## ++++++++++++!!!! 1- ДЛЯ ПРОВЕРКИ СНЯ
+################################################################## ++++++++++++!!!! 1- ДЛЯ ПРОВЕРКИ СНЯ и НЯИ (те, которые были в когорте в Беларуси!) - это дополнительная вкладка
 # 1. Максимально расширенный классификатор MedDRA
 classify_system <- function(diag_val, other_text) {
   # Подготавливаем текст для поиска (только если диагноз = 99)
@@ -1549,15 +1549,20 @@ df_ae_final <- redcap_data %>%
   )
 
 # 3. Запись
-writeData(wb, sheet = "AE", x = df_ae_final)
+writeData(wb, sheet = "AE_1", x = df_ae_final)
 saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 # Проверка в консоли
 others_left <- sum(df_ae_final$AE_SYSTEMORGAN == "Other")
-print(paste("Вкладка AE готова! Осталось 'Other':", others_left))
+print(paste("Вкладка AE_1 готова! Осталось 'Other':", others_left))
 
 ##################################################################
-################################################################## ++++ !!! С препаратами - это дополнительная вкладка (нужно проверить и объединить с AE)
+################################################################## ++++ !!! С препаратами (нужно проверить и объединить с AE_1). 
+# В RedCap нет связи между действий с препаратами и СНЯ!!!
+# Поэтому НЕОБХОДИМА ПРОВЕРКА !!!!!!
+# There is no link between medication actions and adverse events in RedCap!!!
+# Therefore, a manual check is required !!!!!!
+
 # 1. Собираем события по препаратам (из TREATMENT_DETAIL)
 library(purrr) # Убедись, что библиотека подключена
 # 1. Собираем ВСЕ медицинские данные НЯ (СНЯ и Grade 3+ и НЯИ (неврит зрительного нерва/сужение полей зрения))
@@ -1632,7 +1637,8 @@ df_ae_final_v_fixed <- drug_actions_ae %>%
   distinct()
 
 # 3. Запись
-writeData(wb, sheet = "AE_1", x = df_ae_final_v_fixed)
+writeData(wb, sheet = "AE", x = df_ae_final_v_fixed)
 saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
-print(paste("Во вкладке AE_1 нужно проверить соответствие НЯ и действий с препаратами!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
+print(paste("Во вкладке AE нужно проверить соответствие НЯ и действий с препаратами!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
+print(paste("There is no link between medication actions and adverse events in RedCap!!! Therefore, a manual check is required !!!!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
