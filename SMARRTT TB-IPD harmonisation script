@@ -21,6 +21,9 @@
 # - adverse event structure
 # These steps may need adaptation for other datasets.
 
+# The script also includes several basic data consistency checks 
+# (e.g. date logic) to help identify potential data issues before harmonisation.
+
 # Установка и загрузка нужных пакетов
 if (!require("openxlsx")) install.packages("openxlsx")
 if (!require("readxl")) install.packages("readxl")
