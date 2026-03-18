@@ -2,7 +2,7 @@ README
 
 This script was developed as part of the SMARRTT operational research
 project (Belarus cohort) to provide a reproducible workflow 
-for harmonising RedCap data into the TB-IPD data dictionary v1.0 format.
+for harmonising REDCap data into the TB-IPD data dictionary v1.0 format.
 
 Some sections of the script contain dataset-specific transformations 
 based on how variables were recorded in the Belarus database. 
