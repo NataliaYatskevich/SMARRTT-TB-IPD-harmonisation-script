@@ -1495,7 +1495,7 @@ classify_system <- function(diag_val, other_text) {
     grepl("перелом|fracture|укус|змеи|шейки|лодыжки|injury", full_text) ~ "Injury, poisoning and procedural complications",
     grepl("clostrid|difficile|инфекц|сепсис|sepsis|токсоплаз|пневмон|infection|абсцед|эмпием|лейкоэнцеф", full_text) ~ "Infections and infestations",
     grepl("рак|карцином|cancer|carcinoma|мтс|neoplasm|опухоль|tongue|язык|пищевод|бронх", full_text) ~ "Neoplasms benign, malignant and unspecified (incl cysts and polyps)",
-    grepl("анем|anemia|neutrophil|нейтроф|острая сердечная недостаточность", full_text) ~ "Blood and lymphatic system disorders",
+    grepl("анем|anemia|neutrophil|нейтроф", full_text) ~ "Blood and lymphatic system disorders",
     grepl("билируб|билир|гепат|hepat|алт|аст|transam|bilirubin|alt|ast", full_text) ~ "Hepatobiliary disorders",
     grepl("кишеч|желуд|кровотеч|язва|constipation|ischaemia|intest|рвот|тошн|nausea|gast|непроход|ободоч", full_text) ~ "Gastrointestinal disorders",
     grepl("инсульт|инфаркт|атака|тиа|гемипарез|церебральн|мозг|сужение|neuritis|зрен|глаз|vision", full_text) ~ "Nervous system disorders",
