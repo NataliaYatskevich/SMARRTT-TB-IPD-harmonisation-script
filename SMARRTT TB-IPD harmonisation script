@@ -3,17 +3,17 @@
 # Author: Natalia Yatskevich
 # Version: 1.0
 # Date: 17.03.2026
-# Purpose: Transform RedCap export to TB-IPD data dictionary v1.0 format
+# Purpose: Transform REDCap export to TB-IPD data dictionary v1.0 format
 
 # NOTE:
 # This script was developed as part of the SMARRTT operational research 
 # project (Belarus cohort) to provide a reproducible workflow 
-# for harmonising RedCap data into the TB-IPD data dictionary v1.0 format.
-# Some transformations are specific to the Belarus RedCap database structure.
+# for harmonising REDCap data into the TB-IPD data dictionary v1.0 format.
+# Some transformations are specific to the Belarus REDCap database structure.
 # The script may require adaptation before use with other datasets.
 
 # NOTE: Dataset-specific transformations
-# The following steps are specific to the Belarus RedCap database:
+# The following steps are specific to the Belarus REDCap database:
 # - handling of baseline sputum culture negative cases
 # - pregnancy and infant indicators
 # - handling of certain variables on the BASELINE tab
@@ -33,10 +33,10 @@ library(dplyr)
 library(lubridate)
 
 # Путь к CSV файлу
-path_redcap_csv <- "~/RedCap/SixMonthAllOralRegim_DATA_2026-03-13_1531.csv"
+path_redcap_csv <- "~/REDCap/SixMonthAllOralRegim_DATA_2026-03-13_1531.csv"
 
 # Загрузка
-redcap_data <- read.csv("~/RedCap/SixMonthAllOralRegim_DATA_2026-03-13_1531.csv", 
+redcap_data <- read.csv("~/REDCap/SixMonthAllOralRegim_DATA_2026-03-13_1531.csv", 
                         check.names = FALSE, 
                         na.strings = c("", "NA", " "), 
                         encoding = "UTF-8")
@@ -115,9 +115,9 @@ df_baseline_to_write <- redcap_data %>%
   )
 
 # Запись
-wb <- loadWorkbook("~/RedCap/TB_IPD data dictionary v1.0_NY.xlsx")
+wb <- loadWorkbook("~/REDCap/TB_IPD data dictionary v1.0_NY.xlsx")
 writeData(wb, sheet = "BASELINE", x = df_baseline_to_write)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка BASELINE успешно обновлена с новыми форматами, но пока без RENALFAILURE, INSULINDEPENDENT и ART_REGIMEN!")
 
@@ -201,7 +201,7 @@ df_baseline_final <- baseline_combined %>%
 
 # 3. Запись
 writeData(wb, sheet = "BASELINE", x = df_baseline_final)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка BASELINE готова! Все данные по сопутствующим заболеваниям собраны.")
 ################################################################
@@ -215,7 +215,7 @@ df_facility_to_write <- redcap_data %>%
   ungroup() %>%
   transmute(
     COUNTRY    = "Belarus",
-    # redcap_data_access_group — это техническое поле RedCap с названием центра
+    # redcap_data_access_group — это техническое поле REDCap с названием центра
     SOURCE     = redcap_data_access_group, 
     SOURCE_ID  = subjectid
   )
@@ -225,7 +225,7 @@ df_facility_to_write <- redcap_data %>%
 writeData(wb, sheet = "FACILITY", x = df_facility_to_write)
 
 # 3. Сохранение (можно делать один раз в самом конце всех вкладок)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка FACILITY готова!")
 ##################################################################
@@ -277,7 +277,7 @@ df_demographics_to_write <- redcap_data %>%
 
 # 3. Запись
 writeData(wb, sheet = "DEMOGRAPHICS", x = df_demographics_to_write)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка DEMOGRAPHICS готова! YEAR должен подтянуться.")
 ##################################################################
@@ -304,7 +304,7 @@ df_cd4_to_write <- redcap_data %>%
 
 # Запись и сохранение
 writeData(wb, sheet = "CD4", x = df_cd4_to_write)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка CD4 готова через record_id!")
 ##################################################################
@@ -339,7 +339,7 @@ df_wtht_to_write <- redcap_data %>%
 
 # 3. Запись и сохранение
 writeData(wb, sheet = "WT_HT", x = df_wtht_to_write)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка WT_HT готова!")
 
@@ -400,7 +400,7 @@ df_final_wtht <- df_wtht_to_write %>%
 
 # 4. Запись
 writeData(wb, sheet = "WT_HT", x = df_final_wtht)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 print("Вкладка WT_HT готова! Даты проверены.")
 ##################################################################
 # 1. Обработка и проверка
@@ -516,7 +516,7 @@ df_final_labs <- df_labs_processed %>%
 
 # 3. ЗАПИСЬ В ФАЙЛ (этого тоже не хватало)
 writeData(wb, sheet = "LABS", x = df_final_labs)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка LABS сохранена!")
 
@@ -588,7 +588,7 @@ df_final_micro <- df_micro_processed %>%
   )
 
 writeData(wb, sheet = "FUP_MICROBIOLOGY", x = df_final_micro)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 print("Вкладка FUP_MICROBIOLOGY готова! даты проверены.")
 ##################################################################
 
@@ -670,7 +670,7 @@ df_final_micro <- df_micro_processed %>%
   )
 
 writeData(wb, sheet = "FUP_MICROBIOLOGY", x = df_final_micro)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка FUP_MICROBIOLOGY успешно обновлена!")
 #View(micro_errors)
@@ -774,7 +774,7 @@ df_final_smear <- df_smear_processed %>%
 
 # Запись в Excel
 writeData(wb, sheet = "FUP_MICROSCOPY", x = df_final_smear)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка FUP_MICROSCOPY успешно обновлена!")
 
@@ -792,7 +792,7 @@ recode_pos_neg <- function(x) {
   case_match(as.character(x), "1" ~ "Positive", "2" ~ "Negative", .default = "")
 }
 
-# Для устойчивости (обрати внимание: в RedCap 1 и 2 могут меняться местами в разных полях)
+# Для устойчивости (обрати внимание: в REDCap 1 и 2 могут меняться местами в разных полях)
 recode_resist_12 <- function(x) {
   case_match(as.character(x), "1" ~ "Resistant", "2" ~ "Susceptible", "3" ~ "Indeterminate", .default = "")
 }
@@ -850,7 +850,7 @@ df_geno_dst <- redcap_data %>%
 
 # 3. Запись
 writeData(wb, sheet = "GENO_DST", x = df_geno_dst)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка GENO_DST готова!")
 
@@ -930,7 +930,7 @@ df_pheno_dst_all <- redcap_data %>%
 
 # 3. Запись
 writeData(wb, sheet = "PHENO_DST", x = df_pheno_dst_all)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка PHENO_DST готова! Все ТЛЧ сохранены, моксифлоксацин объединен.")
 
@@ -1043,7 +1043,7 @@ df_disease_chars <- df_demographics_to_write %>%
   )
 
 writeData(wb, sheet = "DISEASE_CHARS", x = df_disease_chars)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 
 
@@ -1157,7 +1157,7 @@ df_treat_outcome_final <- outcome_raw_data %>%
 
 # ЗАПИСЬ
 writeData(wb, sheet = "TREAT_OUTCOME", x = df_treat_outcome_final)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка TREAT_OUTCOME готова! Конверсия и рецидивы рассчитаны.")
 
@@ -1235,7 +1235,7 @@ df_prev_treat <- redcap_data %>%
 
 # 2. Запись
 writeData(wb, sheet = "PREVIOUS_TREAT", x = df_prev_treat)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка PREVIOUS_TREAT готова!")
 
@@ -1265,9 +1265,9 @@ df_prev_treat_final <- redcap_data %>%
 
 # 2. Запись
 writeData(wb, sheet = "PREVIOUS_TREAT", x = df_prev_treat_final)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
-print("Вкладка PREVIOUS_TREAT готова по логике RedCap!")
+print("Вкладка PREVIOUS_TREAT готова по логике REDCap!")
 ##################################################################
 # 1. REGIMEN_INFO Логика определения финального режима
 # 1. Собираем дату окончания и исход из vt6 или unscheduled_visit1
@@ -1331,7 +1331,7 @@ df_regimen_info_final <- redcap_data %>%
 
 # 3. Запись
 writeData(wb, sheet = "REGIMEN_INFO", x = df_regimen_info_final)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print("Вкладка REGIMEN_INFO готова! Данные из внепланового визита тоже учтены.")
 
@@ -1395,7 +1395,7 @@ df_final_treatment_detail <- df_treatment_events %>%
 
 # 3. Запись
 writeData(wb, sheet = "TREATMENT_DETAIL", x = df_final_treatment_detail)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print(paste("Вкладка TREATMENT_DETAIL готова! Создано строк событий:", nrow(df_final_treatment_detail)))
 ################################################################## 
@@ -1468,7 +1468,7 @@ df_final_treatment_detail <- df_final_treatment_detail %>%
 
 # 6. Запись
 writeData(wb, sheet = "TREATMENT_DETAIL", x = df_final_treatment_detail)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 
 print(paste("Готово! Строк в таблице:", nrow(df_final_treatment_detail)))
@@ -1550,7 +1550,7 @@ df_ae_final <- redcap_data %>%
 
 # 3. Запись
 writeData(wb, sheet = "AE_1", x = df_ae_final)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 # Проверка в консоли
 others_left <- sum(df_ae_final$AE_SYSTEMORGAN == "Other")
@@ -1558,9 +1558,9 @@ print(paste("Вкладка AE_1 готова! Осталось 'Other':", other
 
 ##################################################################
 ################################################################## ++++ !!! С препаратами (нужно проверить и объединить с AE_1). 
-# В структуре базы данных RedCap нет связи между действий с препаратами и СНЯ!!!
+# В структуре базы данных REDCap нет связи между действий с препаратами и СНЯ!!!
 # Поэтому НЕОБХОДИМА ПРОВЕРКА !!!!!!
-# There is no link between medication actions and adverse events in the RedCap database structure!!!
+# There is no link between medication actions and adverse events in the REDCap database structure!!!
 # Therefore, a manual check is required !!!!!!
 
 # 1. Собираем события по препаратам (из TREATMENT_DETAIL)
@@ -1638,7 +1638,7 @@ df_ae_final_v_fixed <- drug_actions_ae %>%
 
 # 3. Запись
 writeData(wb, sheet = "AE", x = df_ae_final_v_fixed)
-saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
+saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print(paste("Во вкладке AE нужно проверить соответствие НЯ и действий с препаратами!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
-print(paste("There is no link between medication actions and adverse events in the RedCap database structure!!! Therefore, a manual check is required !!!!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
+print(paste("There is no link between medication actions and adverse events in the REDCap database structure!!! Therefore, a manual check is required !!!!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
