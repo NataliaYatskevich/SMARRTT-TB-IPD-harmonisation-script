@@ -1473,7 +1473,7 @@ saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print(paste("Готово! Строк в таблице:", nrow(df_final_treatment_detail)))
 
-################################################################## ++++++++++++!!!! 1- ДЛЯ ПРОВЕРКИ СНЯ и НЯИ (те, которые были в когорте в Беларуси!) - это дополнительная вкладка
+################################################################## ++++++++++++!!!! 1- ДЛЯ ПРОВЕРКИ СНЯ и НЯИ (те, которые были в когорте в Беларуси!). AE_1 - это дополнительная вкладка
 # 1. Максимально расширенный классификатор MedDRA
 classify_system <- function(diag_val, other_text) {
   # Подготавливаем текст для поиска (только если диагноз = 99)
@@ -1558,9 +1558,9 @@ print(paste("Вкладка AE_1 готова! Осталось 'Other':", other
 
 ##################################################################
 ################################################################## ++++ !!! С препаратами (нужно проверить и объединить с AE_1). 
-# В RedCap нет связи между действий с препаратами и СНЯ!!!
+# В структуре базы данных RedCap нет связи между действий с препаратами и СНЯ!!!
 # Поэтому НЕОБХОДИМА ПРОВЕРКА !!!!!!
-# There is no link between medication actions and adverse events in RedCap!!!
+# There is no link between medication actions and adverse events in the RedCap database structure!!!
 # Therefore, a manual check is required !!!!!!
 
 # 1. Собираем события по препаратам (из TREATMENT_DETAIL)
@@ -1641,4 +1641,4 @@ writeData(wb, sheet = "AE", x = df_ae_final_v_fixed)
 saveWorkbook(wb, "~/RedCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print(paste("Во вкладке AE нужно проверить соответствие НЯ и действий с препаратами!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
-print(paste("There is no link between medication actions and adverse events in RedCap!!! Therefore, a manual check is required !!!!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
+print(paste("There is no link between medication actions and adverse events in the RedCap database structure!!! Therefore, a manual check is required !!!!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
