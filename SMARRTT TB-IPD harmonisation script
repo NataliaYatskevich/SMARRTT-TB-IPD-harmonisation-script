@@ -1641,4 +1641,4 @@ writeData(wb, sheet = "AE", x = df_ae_final_v_fixed)
 saveWorkbook(wb, "~/REDCap/TB_IPD_Updated_Final.xlsx", overwrite = TRUE)
 
 print(paste("Во вкладке AE нужно проверить соответствие НЯ и действий с препаратами!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
-print(paste("There is no link between medication actions and adverse events in the REDCap database structure!!! Therefore, a manual check is required !!!!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
+print(paste("There is no linkage between medication-related actions and specific adverse events in the REDCap database structure; therefore, a manual review is required!!!!!! 🌸🌸🌸 Всего строк:", nrow(df_ae_final_v_fixed)))
